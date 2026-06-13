@@ -390,9 +390,11 @@ const BEST_KEY = "infinrun_best";
 let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10) || 0;
 bestEl.textContent = best;
 
-// --- Expression engine: a live, left-to-right calculator (no precedence) ---
-// total: committed result; op: pending operator; building: number being typed
-const expr = { total: null, op: null, building: null };
+// --- Expression engine: a left-to-right calculator with strict alternation ---
+// You grab a seed number, then must alternate operator → number → operator …
+// Grabbing the wrong type is fatal. total: running result; op: pending operator;
+// expect: which token type is required next ("num" or "op").
+const expr = { total: null, op: null, expect: "num" };
 
 function applyOp(a, op, b) {
   if (op === "+") return a + b;
@@ -402,22 +404,16 @@ function applyOp(a, op, b) {
   return b;
 }
 
-// the value the player is currently "holding" (includes the un-committed number)
-function liveValue() {
-  if (expr.building === null) return expr.total;
-  if (expr.total === null) return expr.building;
-  return applyOp(expr.total, expr.op, expr.building);
-}
-
 function resetExpr() {
   expr.total = null;
   expr.op = null;
-  expr.building = null;
+  expr.expect = "num";
 }
 
 function pickTarget() {
-  const max = Math.min(99, 12 + solves * 4);
-  target = 2 + Math.floor(Math.random() * (max - 1));
+  // min 10 so you can't just grab the seed number and win
+  const max = Math.min(99, 18 + solves * 4);
+  target = 10 + Math.floor(Math.random() * (max - 9));
   if (targetEl) targetEl.textContent = target;
 }
 
@@ -430,13 +426,9 @@ function flashExpr(bad) {
 
 function updateMathHud() {
   if (!exprEl) return;
-  let s = "";
-  if (expr.total !== null) s += expr.total;
-  if (expr.op !== null) s += " " + OP_SYMBOL[expr.op] + " ";
-  if (expr.building !== null) s += expr.building;
-  const v = liveValue();
-  if (s === "") s = "·";
-  else if (v !== null) s += "  =  " + v;
+  let s = expr.total === null ? "·" : String(expr.total);
+  if (expr.op !== null) s += " " + OP_SYMBOL[expr.op] + " ▢"; // awaiting a number
+  else if (expr.total !== null) s += "  +−×÷?"; // awaiting an operator
   exprEl.textContent = s;
 }
 
@@ -456,45 +448,46 @@ function onTargetHit() {
   updateMathHud();
 }
 
-function afterCollect() {
+function collectNumber(n) {
+  if (expr.expect !== "num") {
+    gameOver(); // grabbed a number when an operator was due
+    return;
+  }
+  if (expr.total === null) {
+    expr.total = n; // seed value
+  } else if (expr.op === "/") {
+    if (n === 0 || expr.total % n !== 0) {
+      // illegal division → reset the expression (forgiving), with a cue
+      resetExpr();
+      flashExpr(true);
+      shake = Math.max(shake, 0.25);
+      updateMathHud();
+      return;
+    }
+    expr.total = expr.total / n;
+    expr.op = null;
+  } else {
+    expr.total = applyOp(expr.total, expr.op, n);
+    expr.op = null;
+  }
+  expr.expect = "op";
   updateMathHud();
-  const v = liveValue();
-  if (v !== null && Number.isInteger(v) && v === target) onTargetHit();
-}
-
-function collectDigit(d) {
-  expr.building = expr.building === null ? d : Math.min(expr.building * 10 + d, 9999);
-  afterCollect();
+  if (expr.total === target) onTargetHit();
 }
 
 function collectOperator(op) {
-  // commit the number being typed using the previously-pending operator
-  if (expr.building !== null) {
-    if (expr.total === null) {
-      expr.total = expr.building;
-    } else if (expr.op === "/") {
-      if (expr.building === 0 || expr.total % expr.building !== 0) {
-        // illegal division → reset the expression (forgiving), with a cue
-        resetExpr();
-        flashExpr(true);
-        shake = Math.max(shake, 0.25);
-        updateMathHud();
-        return;
-      }
-      expr.total = expr.total / expr.building;
-    } else {
-      expr.total = applyOp(expr.total, expr.op, expr.building);
-    }
-    expr.building = null;
+  if (expr.expect !== "op") {
+    gameOver(); // grabbed an operator when a number was due
+    return;
   }
-  // a leading operator (no number yet) is ignored
-  if (expr.total !== null) expr.op = op;
-  afterCollect();
+  expr.op = op;
+  expr.expect = "num";
+  updateMathHud();
 }
 
 function collectToken(data) {
   if (data.isOp) collectOperator(data.op);
-  else collectDigit(data.digit);
+  else collectNumber(data.digit);
 }
 
 function reset() {
@@ -612,9 +605,9 @@ document.getElementById("retry-btn").addEventListener("click", startGame);
 // Spawning
 // ---------------------------------------------------------------------------
 function randomTokenData() {
-  // ~60% digit, ~40% operator
-  if (Math.random() < 0.6) {
-    return { isOp: false, digit: Math.floor(Math.random() * 10), label: null };
+  // ~50% number, ~50% operator (you need them about equally often)
+  if (Math.random() < 0.5) {
+    return { isOp: false, digit: 1 + Math.floor(Math.random() * 9), label: null };
   }
   const ops = ["+", "-", "*", "/"];
   const op = ops[Math.floor(Math.random() * ops.length)];

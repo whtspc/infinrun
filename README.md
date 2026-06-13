@@ -9,15 +9,17 @@ number — then it gives you a new one. Swipe to pick which token you grab.
 
 ## How to play
 
-- A **TARGET** number is shown at the top. Build it with the tokens you collect.
-- Tokens are **digits** (`0`–`9`) and **operators** (`+ − × ÷`). Collect a digit
-  to build a number (`1` then `2` → `12`); collect an operator to apply your held
-  number to the running total. It's a live, left-to-right calculator (no
-  precedence).
-- Match the target exactly to score and get a new target. Overshooting is fine —
-  use `−` and `÷` to come back.
-- A `÷` that wouldn't divide evenly is illegal and **resets your expression**.
-- Rows always leave at least one empty lane, so you can skip a token you don't want.
+- A **TARGET** number is shown at the top. Reach it with a running calculation.
+- Grab a **number** to seed the total, then strictly **alternate**: operator →
+  number → operator → number… It's a left-to-right calculator (no precedence).
+- Tokens are numbers (`1`–`9`) and operators (`+ − × ÷`). **Grabbing the wrong
+  type — a number when an operator is due, or vice-versa — crashes you.**
+- Match the target exactly to score and get a new (bigger) target. Overshooting is
+  fine — use `−` and `÷` to come back.
+- A `÷` that wouldn't divide evenly is illegal and **resets your expression**
+  (no crash).
+- Rows always leave at least one empty lane, so you can steer there to **skip** a
+  row when it has no token you can safely take.
 
 ## Controls
 
