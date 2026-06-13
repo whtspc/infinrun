@@ -29,6 +29,12 @@ const DESPAWN_Z = 8; // ...and are recycled once they pass the camera
 const BASE_SPEED = 26; // world units / second
 const MAX_SPEED = 78;
 
+// Track curvature (purely visual). bend() returns a sideways offset that is
+// ~0 at the ship's depth and grows with distance ahead, so the road appears
+// to wind in the distance while gameplay lanes stay logically straight.
+const CURVE_AMP = 6.0; // max lateral sway, world units
+const CURVE_FREQ = 0.02; // spatial frequency → long, gentle curves
+
 const BG = 0x05060f;
 const CYAN = 0x36e0ff;
 const PINK = 0xff4d8d;
@@ -92,19 +98,71 @@ function makeGridTexture() {
   return tex;
 }
 
+// ---------------------------------------------------------------------------
+// Track curvature — one bend function shared by the shader (floor/rails) and
+// the CPU (asteroids, camera) so everything curves together.
+// ---------------------------------------------------------------------------
+let traveled = 0; // distance scrolled so far; drives the traveling curve
+const bendUniforms = {
+  uTraveled: { value: 0 },
+  uCurveAmp: { value: CURVE_AMP },
+  uCurveFreq: { value: CURVE_FREQ },
+  uShipZ: { value: SHIP_Z },
+};
+
+// JS mirror of the GLSL bend (must stay in sync with the shader below)
+function bendX(z) {
+  const ahead = SHIP_Z - z;
+  return (
+    CURVE_AMP *
+    (Math.sin((traveled + ahead) * CURVE_FREQ) - Math.sin(traveled * CURVE_FREQ))
+  );
+}
+
+// Make any material bend its geometry horizontally by world-Z. Works for the
+// floor (rotated about X) and rails (no rotation) because neither rotates
+// about Y/Z, so an object-space X offset equals a world-space X offset.
+function makeBendable(material) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTraveled = bendUniforms.uTraveled;
+    shader.uniforms.uCurveAmp = bendUniforms.uCurveAmp;
+    shader.uniforms.uCurveFreq = bendUniforms.uCurveFreq;
+    shader.uniforms.uShipZ = bendUniforms.uShipZ;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+         uniform float uTraveled; uniform float uCurveAmp;
+         uniform float uCurveFreq; uniform float uShipZ;
+         float infinrunBendX(float z) {
+           float ahead = uShipZ - z;
+           return uCurveAmp *
+             (sin((uTraveled + ahead) * uCurveFreq) - sin(uTraveled * uCurveFreq));
+         }`
+      )
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+         vec4 infinrunWP = modelMatrix * vec4(position, 1.0);
+         transformed.x += infinrunBendX(infinrunWP.z);`
+      );
+  };
+  return material;
+}
+
 const gridTex = makeGridTexture();
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(LANE_X[2] - LANE_X[0] + 2.4, 400),
-  new THREE.MeshBasicMaterial({ map: gridTex })
+  new THREE.PlaneGeometry(LANE_X[2] - LANE_X[0] + 2.4, 400, 1, 240),
+  makeBendable(new THREE.MeshBasicMaterial({ map: gridTex }))
 );
 floor.rotation.x = -Math.PI / 2;
 floor.position.set(0, FLOOR_Y, -190);
 scene.add(floor);
 
-// soft glowing edges along the track
-const edgeMat = new THREE.MeshBasicMaterial({ color: CYAN });
+// soft glowing edges along the track (segmented so they bend smoothly)
+const edgeMat = makeBendable(new THREE.MeshBasicMaterial({ color: CYAN }));
 for (const x of [LANE_X[0] - 1.2, LANE_X[2] + 1.2]) {
-  const edge = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 400), edgeMat);
+  const edge = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 400, 1, 1, 240), edgeMat);
   edge.position.set(x, FLOOR_Y + 0.06, -190);
   scene.add(edge);
 }
@@ -309,6 +367,7 @@ function reset() {
   score = 0;
   speed = BASE_SPEED;
   elapsed = 0;
+  traveled = 0;
   spawnInterval = 1.0;
   spawnTimer = 0.5;
   shake = 0;
@@ -411,7 +470,8 @@ function spawnObstacles() {
     const m = getObstacle();
     const s = 0.7 + Math.random() * 0.7;
     m.scale.setScalar(s);
-    m.position.set(LANE_X[lane], 0.9, SPAWN_Z);
+    m.userData.lane = lane;
+    m.position.set(LANE_X[lane] + bendX(SPAWN_Z), 0.9, SPAWN_Z);
     m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
     m.userData.spin.set(
       (Math.random() - 0.5) * 2,
@@ -428,6 +488,10 @@ function spawnObstacles() {
 // ---------------------------------------------------------------------------
 function update(dt) {
   const moveSpeed = state === STATE.PLAY ? speed : BASE_SPEED * 0.6;
+
+  // advance the traveling curve (drives the bend shader + CPU bend)
+  traveled += moveSpeed * dt;
+  bendUniforms.uTraveled.value = traveled;
 
   // scroll the track texture + starfield for a sense of motion
   gridTex.offset.y += moveSpeed * dt * 0.05;
@@ -470,6 +534,11 @@ function update(dt) {
     camera.position.copy(CAM_BASE);
   }
 
+  // aim the chase camera into the curve ahead, with a subtle roll
+  const lookX = bendX(SHIP_Z - 55) * 0.45;
+  camera.lookAt(lookX, 0.9, -16);
+  camera.rotation.z = -lookX * 0.015;
+
   if (state === STATE.PLAY) {
     elapsed += dt;
     score += dt * 10 + (speed / BASE_SPEED) * dt * 4;
@@ -497,6 +566,7 @@ function update(dt) {
   for (let i = obstacles.length - 1; i >= 0; i--) {
     const o = obstacles[i];
     o.position.z += moveSpeed * dt;
+    o.position.x = LANE_X[o.userData.lane] + bendX(o.position.z);
     o.rotation.x += o.userData.spin.x * dt;
     o.rotation.y += o.userData.spin.y * dt;
     o.rotation.z += o.userData.spin.z * dt;
