@@ -37,6 +37,10 @@ const MAX_SPEED = 50; // capped lower than the dodger — you need time to read 
 // to wind in the distance while gameplay lanes stay logically straight.
 const CURVE_AMP = 6.0; // max lateral sway, world units
 const CURVE_FREQ = 0.02; // spatial frequency → long, gentle curves
+// vertical hills — same idea on the height axis, offset so they don't line up
+const CURVE_AMP_Y = 2.6; // hill height, world units
+const CURVE_FREQ_Y = 0.016;
+const CURVE_PHASE_Y = 1.7; // de-sync from the horizontal curve
 
 const BG = 0x05060f;
 const CYAN = 0x36e0ff;
@@ -110,10 +114,13 @@ const bendUniforms = {
   uTraveled: { value: 0 },
   uCurveAmp: { value: CURVE_AMP },
   uCurveFreq: { value: CURVE_FREQ },
+  uCurveAmpY: { value: CURVE_AMP_Y },
+  uCurveFreqY: { value: CURVE_FREQ_Y },
+  uCurvePhaseY: { value: CURVE_PHASE_Y },
   uShipZ: { value: SHIP_Z },
 };
 
-// JS mirror of the GLSL bend (must stay in sync with the shader below)
+// JS mirrors of the GLSL bends (must stay in sync with the shader below)
 function bendX(z) {
   const ahead = SHIP_Z - z;
   return (
@@ -121,33 +128,44 @@ function bendX(z) {
     (Math.sin((traveled + ahead) * CURVE_FREQ) - Math.sin(traveled * CURVE_FREQ))
   );
 }
+function bendY(z) {
+  const ahead = SHIP_Z - z;
+  return (
+    CURVE_AMP_Y *
+    (Math.sin((traveled + ahead) * CURVE_FREQ_Y + CURVE_PHASE_Y) -
+      Math.sin(traveled * CURVE_FREQ_Y + CURVE_PHASE_Y))
+  );
+}
 
-// Make any material bend its geometry horizontally by world-Z. Works for the
-// floor (rotated about X) and rails (no rotation) because neither rotates
-// about Y/Z, so an object-space X offset equals a world-space X offset.
-function makeBendable(material) {
+// Make a material bend its geometry by world-Z: sideways (always object X, since
+// neither mesh rotates about Y/Z) and vertically. "World up" maps to a different
+// object axis per mesh — the flat floor is rotated, so pass its vertical axis.
+function makeBendable(material, vertAxis = "y") {
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTraveled = bendUniforms.uTraveled;
-    shader.uniforms.uCurveAmp = bendUniforms.uCurveAmp;
-    shader.uniforms.uCurveFreq = bendUniforms.uCurveFreq;
-    shader.uniforms.uShipZ = bendUniforms.uShipZ;
+    Object.assign(shader.uniforms, bendUniforms);
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
         `#include <common>
-         uniform float uTraveled; uniform float uCurveAmp;
-         uniform float uCurveFreq; uniform float uShipZ;
+         uniform float uTraveled; uniform float uCurveAmp; uniform float uCurveFreq;
+         uniform float uCurveAmpY; uniform float uCurveFreqY; uniform float uCurvePhaseY;
+         uniform float uShipZ;
          float infinrunBendX(float z) {
-           float ahead = uShipZ - z;
-           return uCurveAmp *
-             (sin((uTraveled + ahead) * uCurveFreq) - sin(uTraveled * uCurveFreq));
+           float a = uShipZ - z;
+           return uCurveAmp * (sin((uTraveled + a) * uCurveFreq) - sin(uTraveled * uCurveFreq));
+         }
+         float infinrunBendY(float z) {
+           float a = uShipZ - z;
+           return uCurveAmpY * (sin((uTraveled + a) * uCurveFreqY + uCurvePhaseY)
+             - sin(uTraveled * uCurveFreqY + uCurvePhaseY));
          }`
       )
       .replace(
         "#include <begin_vertex>",
         `#include <begin_vertex>
          vec4 infinrunWP = modelMatrix * vec4(position, 1.0);
-         transformed.x += infinrunBendX(infinrunWP.z);`
+         transformed.x += infinrunBendX(infinrunWP.z);
+         transformed.${vertAxis} += infinrunBendY(infinrunWP.z);`
       );
   };
   return material;
@@ -156,7 +174,8 @@ function makeBendable(material) {
 const gridTex = makeGridTexture();
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(LANE_X[2] - LANE_X[0] + 2.4, 400, 1, 240),
-  makeBendable(new THREE.MeshBasicMaterial({ map: gridTex }))
+  // floor is rotated flat, so its "up" is local Z
+  makeBendable(new THREE.MeshBasicMaterial({ map: gridTex }), "z")
 );
 floor.rotation.x = -Math.PI / 2;
 floor.position.set(0, FLOOR_Y, -190);
@@ -655,9 +674,10 @@ function update(dt) {
     camera.position.copy(CAM_BASE);
   }
 
-  // aim the chase camera into the curve ahead, with a subtle roll
+  // aim the chase camera into the curve + hill ahead, with a subtle roll
   const lookX = bendX(SHIP_Z - 55) * 0.45;
-  camera.lookAt(lookX, 0.9, -16);
+  const lookY = 0.9 + bendY(SHIP_Z - 55) * 0.6;
+  camera.lookAt(lookX, lookY, -16);
   camera.rotation.z = -lookX * 0.015;
 
   if (state === STATE.PLAY) {
@@ -675,19 +695,22 @@ function update(dt) {
     }
   }
 
-  // ease ship toward target lane + bank into the turn
+  // ease ship toward target lane + bank into the turn + pitch on hills
   shipState.x += (shipState.targetX - shipState.x) * Math.min(1, dt * 12);
   ship.position.x = shipState.x;
   ship.position.y = SHIP_Y + Math.sin(performance.now() / 350) * 0.06;
   const drift = shipState.targetX - shipState.x;
+  const slope = bendY(SHIP_Z - 6) - bendY(SHIP_Z); // road rise just ahead
   ship.rotation.z = THREE.MathUtils.clamp(-drift * 0.5, -0.6, 0.6);
   ship.rotation.y = THREE.MathUtils.clamp(-drift * 0.12, -0.2, 0.2);
+  ship.rotation.x = THREE.MathUtils.clamp(slope * 0.2, -0.35, 0.35);
 
   // move tokens toward the camera; collect the one in the ship's lane
   for (let i = tokens.length - 1; i >= 0; i--) {
     const t = tokens[i];
     t.position.z += moveSpeed * dt;
     t.position.x = LANE_X[t.userData.lane] + bendX(t.position.z);
+    t.position.y = 0.95 + bendY(t.position.z);
     t.quaternion.copy(camera.quaternion); // billboard toward the camera
 
     // resolve once as the token reaches the ship's depth
