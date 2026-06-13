@@ -269,24 +269,24 @@ const shipState = {
 };
 
 // ---------------------------------------------------------------------------
-// Math tokens (digits + operators) — billboard glyph panels, pooled
+// Math tokens — each is a whole move (operator + integer), billboard panels
 // ---------------------------------------------------------------------------
-const OP_SYMBOL = { "+": "+", "-": "−", "*": "×", "/": "÷" };
-const tokenGeo = new THREE.PlaneGeometry(1.5, 1.5);
+const OP_SYMBOL = { "+": "+", "-": "−", "*": "×", "/": "/" };
+const OP_COLOR = { "+": "#36ffa6", "-": "#ff6b9d", "*": "#36e0ff", "/": "#ffd84d" };
+const tokenGeo = new THREE.PlaneGeometry(1.6, 1.6);
 const glyphCache = new Map(); // label -> CanvasTexture
 
-function glyphTexture(label, isOp) {
-  const key = (isOp ? "op:" : "n:") + label;
-  if (glyphCache.has(key)) return glyphCache.get(key);
+function glyphTexture(label, op) {
+  if (glyphCache.has(label)) return glyphCache.get(label);
   const c = document.createElement("canvas");
   c.width = c.height = 192;
   const g = c.getContext("2d");
-  const accent = isOp ? "#ffd84d" : "#36e0ff";
+  const accent = OP_COLOR[op] || "#36e0ff";
   // rounded neon panel
   const r = 34;
   g.lineWidth = 9;
   g.strokeStyle = accent;
-  g.fillStyle = "rgba(8,14,28,0.82)";
+  g.fillStyle = "rgba(8,14,28,0.85)";
   g.beginPath();
   g.moveTo(24 + r, 24);
   g.arcTo(168, 24, 168, 168, r);
@@ -296,18 +296,18 @@ function glyphTexture(label, isOp) {
   g.closePath();
   g.fill();
   g.stroke();
-  // glyph
-  g.fillStyle = accent;
-  g.font = "bold 120px system-ui, sans-serif";
+  // glyph (smaller now that labels are 2 chars like "+3")
+  g.fillStyle = "#ffffff";
+  g.font = "bold 96px system-ui, sans-serif";
   g.textAlign = "center";
   g.textBaseline = "middle";
   g.shadowColor = accent;
-  g.shadowBlur = 18;
-  g.fillText(label, 96, 104);
+  g.shadowBlur = 22;
+  g.fillText(label, 96, 102);
   const tex = new THREE.CanvasTexture(c);
   tex.anisotropy = 4;
   tex.colorSpace = THREE.SRGBColorSpace;
-  glyphCache.set(key, tex);
+  glyphCache.set(label, tex);
   return tex;
 }
 
@@ -390,11 +390,10 @@ const BEST_KEY = "infinrun_best";
 let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10) || 0;
 bestEl.textContent = best;
 
-// --- Expression engine: a left-to-right calculator with strict alternation ---
-// You grab a seed number, then must alternate operator → number → operator …
-// Grabbing the wrong type is fatal. total: running result; op: pending operator;
-// expect: which token type is required next ("num" or "op").
-const expr = { total: null, op: null, expect: "num" };
+// --- Expression engine: a running calculator. Each token is a whole move
+// (operator + integer, e.g. "+3"), applied to the running total which seeds
+// at 0. An illegal division (fraction) resets the total. ---
+const expr = { total: 0 };
 
 function applyOp(a, op, b) {
   if (op === "+") return a + b;
@@ -405,13 +404,10 @@ function applyOp(a, op, b) {
 }
 
 function resetExpr() {
-  expr.total = null;
-  expr.op = null;
-  expr.expect = "num";
+  expr.total = 0;
 }
 
 function pickTarget() {
-  // min 10 so you can't just grab the seed number and win
   const max = Math.min(99, 18 + solves * 4);
   target = 10 + Math.floor(Math.random() * (max - 9));
   if (targetEl) targetEl.textContent = target;
@@ -426,10 +422,7 @@ function flashExpr(bad) {
 
 function updateMathHud() {
   if (!exprEl) return;
-  let s = expr.total === null ? "·" : String(expr.total);
-  if (expr.op !== null) s += " " + OP_SYMBOL[expr.op] + " ▢"; // awaiting a number
-  else if (expr.total !== null) s += "  +−×÷?"; // awaiting an operator
-  exprEl.textContent = s;
+  exprEl.textContent = String(expr.total);
 }
 
 function onTargetHit() {
@@ -448,16 +441,12 @@ function onTargetHit() {
   updateMathHud();
 }
 
-function collectNumber(n) {
-  if (expr.expect !== "num") {
-    gameOver(); // grabbed a number when an operator was due
-    return;
-  }
-  if (expr.total === null) {
-    expr.total = n; // seed value
-  } else if (expr.op === "/") {
+// apply a combined operator+integer token to the running total
+function collectToken(data) {
+  const { op, n } = data;
+  if (op === "/") {
     if (n === 0 || expr.total % n !== 0) {
-      // illegal division → reset the expression (forgiving), with a cue
+      // illegal division → reset the total (forgiving), with a cue
       resetExpr();
       flashExpr(true);
       shake = Math.max(shake, 0.25);
@@ -465,29 +454,11 @@ function collectNumber(n) {
       return;
     }
     expr.total = expr.total / n;
-    expr.op = null;
   } else {
-    expr.total = applyOp(expr.total, expr.op, n);
-    expr.op = null;
+    expr.total = applyOp(expr.total, op, n);
   }
-  expr.expect = "op";
   updateMathHud();
   if (expr.total === target) onTargetHit();
-}
-
-function collectOperator(op) {
-  if (expr.expect !== "op") {
-    gameOver(); // grabbed an operator when a number was due
-    return;
-  }
-  expr.op = op;
-  expr.expect = "num";
-  updateMathHud();
-}
-
-function collectToken(data) {
-  if (data.isOp) collectOperator(data.op);
-  else collectNumber(data.digit);
 }
 
 function reset() {
@@ -604,14 +575,13 @@ document.getElementById("retry-btn").addEventListener("click", startGame);
 // ---------------------------------------------------------------------------
 // Spawning
 // ---------------------------------------------------------------------------
+// operators weighted so ÷ (often illegal) is rarer
+const OP_BAG = ["+", "+", "+", "-", "-", "*", "*", "/"];
+
 function randomTokenData() {
-  // ~50% number, ~50% operator (you need them about equally often)
-  if (Math.random() < 0.5) {
-    return { isOp: false, digit: 1 + Math.floor(Math.random() * 9), label: null };
-  }
-  const ops = ["+", "-", "*", "/"];
-  const op = ops[Math.floor(Math.random() * ops.length)];
-  return { isOp: true, op, label: OP_SYMBOL[op] };
+  const op = OP_BAG[Math.floor(Math.random() * OP_BAG.length)];
+  const n = 1 + Math.floor(Math.random() * 9);
+  return { op, n, label: OP_SYMBOL[op] + n };
 }
 
 function spawnTokens() {
@@ -623,9 +593,8 @@ function spawnTokens() {
 
   for (const lane of chosen) {
     const data = randomTokenData();
-    const label = data.isOp ? data.label : String(data.digit);
     const m = getToken();
-    m.material.map = glyphTexture(label, data.isOp);
+    m.material.map = glyphTexture(data.label, data.op);
     m.material.needsUpdate = true;
     m.userData.lane = lane;
     m.userData.data = data;

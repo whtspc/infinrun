@@ -9,17 +9,15 @@ number — then it gives you a new one. Swipe to pick which token you grab.
 
 ## How to play
 
-- A **TARGET** number is shown at the top. Reach it with a running calculation.
-- Grab a **number** to seed the total, then strictly **alternate**: operator →
-  number → operator → number… It's a left-to-right calculator (no precedence).
-- Tokens are numbers (`1`–`9`) and operators (`+ − × ÷`). **Grabbing the wrong
-  type — a number when an operator is due, or vice-versa — crashes you.**
+- A **TARGET** number is shown at the top. Steer your running total to it.
+- Each token is a whole move — an operator combined with an integer, e.g. `+3`,
+  `−2`, `×4`, `/6`. Fly into one to apply it to your total (which starts at 0).
+  It's a left-to-right calculator (no precedence).
+- Tokens are colour-coded by operator (`+` green, `−` pink, `×` cyan, `/` gold).
 - Match the target exactly to score and get a new (bigger) target. Overshooting is
-  fine — use `−` and `÷` to come back.
-- A `÷` that wouldn't divide evenly is illegal and **resets your expression**
-  (no crash).
-- Rows always leave at least one empty lane, so you can steer there to **skip** a
-  row when it has no token you can safely take.
+  fine — use `−` and `/` to come back.
+- A `/` that wouldn't divide evenly is illegal and **resets your total**.
+- Rows always leave at least one empty lane, so you can steer there to **skip**.
 
 ## Controls
 
