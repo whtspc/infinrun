@@ -20,6 +20,17 @@
 
   <title>InfinRun — Spaceship Runner</title>
   <link rel="stylesheet" href="style.css" />
+
+  <!-- Three.js is loaded from a CDN at runtime via this import map.
+       To remove the runtime dependency, drop three.module.js into
+       vendor/ and point "three" at "./vendor/three.module.js". -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"
+      }
+    }
+  </script>
 </head>
 <body>
   <div id="game-wrap">
@@ -57,6 +68,22 @@
     </div>
   </div>
 
-  <script src="game.js"></script>
+  <script type="module" src="game.js"></script>
+
+  <!-- Fallback: if the 3D engine fails to load (offline / CDN blocked),
+       tell the player instead of leaving a dead button. -->
+  <script>
+    setTimeout(function () {
+      if (!window.__INFINRUN_READY) {
+        var hint = document.querySelector("#start .hint");
+        if (hint) {
+          hint.textContent =
+            "Couldn't load the 3D engine — check your connection and reload.";
+          hint.style.opacity = "0.9";
+          hint.style.color = "#ff4d8d";
+        }
+      }
+    }, 9000);
+  </script>
 </body>
 </html>

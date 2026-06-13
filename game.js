@@ -1,491 +1,544 @@
-/* InfinRun — a 3-lane spaceship infinite runner.
-   Vanilla Canvas, no dependencies. Portrait / mobile-first. */
-(() => {
-  "use strict";
+/* InfinRun 3D — a 3-lane spaceship infinite runner, Subway-Surfers style.
+   Real WebGL 3D via Three.js. Portrait / mobile-first, no build step. */
+import * as THREE from "three";
 
-  const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
+// ---------------------------------------------------------------------------
+// DOM
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById("game");
+const hud = document.getElementById("hud");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("best");
+const startScreen = document.getElementById("start");
+const gameoverScreen = document.getElementById("gameover");
+const finalScoreEl = document.getElementById("final-score");
+const finalBestEl = document.getElementById("final-best");
+const newBestEl = document.getElementById("new-best");
 
-  // --- DOM ---
-  const hud = document.getElementById("hud");
-  const scoreEl = document.getElementById("score");
-  const bestEl = document.getElementById("best");
-  const startScreen = document.getElementById("start");
-  const gameoverScreen = document.getElementById("gameover");
-  const finalScoreEl = document.getElementById("final-score");
-  const finalBestEl = document.getElementById("final-best");
-  const newBestEl = document.getElementById("new-best");
+// ---------------------------------------------------------------------------
+// Constants / world layout
+// ---------------------------------------------------------------------------
+const LANES = 3;
+const LANE_X = [-2.4, 0, 2.4]; // x position of each lane
+const SHIP_Z = 0; // ship stays here; the world scrolls toward +z
+const SHIP_Y = 0.6;
+const FLOOR_Y = -0.2;
+const SPAWN_Z = -150; // obstacles appear this far ahead
+const DESPAWN_Z = 8; // ...and are recycled once they pass the camera
 
-  // --- World sizing (logical pixels) ---
-  let W = 0;
-  let H = 0;
-  let dpr = 1;
-  const LANES = 3;
-  let laneX = []; // centre x of each lane
-  let laneW = 0;
+const BASE_SPEED = 26; // world units / second
+const MAX_SPEED = 78;
 
-  function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth;
-    H = window.innerHeight;
-    canvas.width = Math.floor(W * dpr);
-    canvas.height = Math.floor(H * dpr);
-    canvas.style.width = W + "px";
-    canvas.style.height = H + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+const BG = 0x05060f;
+const CYAN = 0x36e0ff;
+const PINK = 0xff4d8d;
 
-    laneW = W / LANES;
-    laneX = [];
-    for (let i = 0; i < LANES; i++) laneX.push(laneW * (i + 0.5));
+// ---------------------------------------------------------------------------
+// Renderer / scene / camera
+// ---------------------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(BG, 1);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.Fog(BG, 35, 145);
+
+const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 400);
+const CAM_BASE = new THREE.Vector3(0, 3.2, 7);
+camera.position.copy(CAM_BASE);
+camera.lookAt(0, 1.0, -12);
+
+// ---------------------------------------------------------------------------
+// Lights
+// ---------------------------------------------------------------------------
+scene.add(new THREE.AmbientLight(0x88aaff, 0.6));
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+keyLight.position.set(3, 10, 4);
+scene.add(keyLight);
+const rimLight = new THREE.DirectionalLight(CYAN, 0.6);
+rimLight.position.set(-4, 3, -6);
+scene.add(rimLight);
+
+// ---------------------------------------------------------------------------
+// Floor — a long plane with a scrolling neon-grid texture
+// ---------------------------------------------------------------------------
+function makeGridTexture() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = "#05060f";
+  g.fillRect(0, 0, 128, 128);
+  // transverse line (scrolls toward the camera, selling forward motion)
+  g.strokeStyle = "rgba(54,224,255,0.55)";
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(0, 2);
+  g.lineTo(128, 2);
+  g.stroke();
+  // bright lane dividers (vertical = along depth, stay fixed on screen)
+  g.strokeStyle = "rgba(54,224,255,0.85)";
+  g.lineWidth = 4;
+  for (const x of [128 / 3, (128 / 3) * 2]) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, 128);
+    g.stroke();
   }
-  window.addEventListener("resize", resize);
-  resize();
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 60);
+  return tex;
+}
 
-  // --- High score ---
-  const BEST_KEY = "infinrun_best";
-  let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10) || 0;
-  bestEl.textContent = best;
+const gridTex = makeGridTexture();
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(LANE_X[2] - LANE_X[0] + 2.4, 400),
+  new THREE.MeshBasicMaterial({ map: gridTex })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.set(0, FLOOR_Y, -190);
+scene.add(floor);
 
-  // --- Game state ---
-  const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
-  let state = STATE.MENU;
+// soft glowing edges along the track
+const edgeMat = new THREE.MeshBasicMaterial({ color: CYAN });
+for (const x of [LANE_X[0] - 1.2, LANE_X[2] + 1.2]) {
+  const edge = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 400), edgeMat);
+  edge.position.set(x, FLOOR_Y + 0.06, -190);
+  scene.add(edge);
+}
 
-  const ship = {
-    lane: 1,
-    x: 0, // current pixel x (eased toward target lane)
-    targetX: 0,
-    y: 0,
-    w: 0,
-    h: 0,
-  };
+// ---------------------------------------------------------------------------
+// Starfield (warp streaks)
+// ---------------------------------------------------------------------------
+const STAR_COUNT = 500;
+const starPos = new Float32Array(STAR_COUNT * 3);
+function placeStar(i, far) {
+  starPos[i * 3] = (Math.random() - 0.5) * 80;
+  starPos[i * 3 + 1] = Math.random() * 45 + 1;
+  starPos[i * 3 + 2] = far ? -Math.random() * 200 : SPAWN_Z - Math.random() * 60;
+}
+for (let i = 0; i < STAR_COUNT; i++) placeStar(i, true);
+const starGeo = new THREE.BufferGeometry();
+starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+const stars = new THREE.Points(
+  starGeo,
+  new THREE.PointsMaterial({ color: 0xbfe9ff, size: 0.35, sizeAttenuation: true })
+);
+stars.frustumCulled = false;
+scene.add(stars);
 
-  let obstacles = [];
-  let stars = [];
-  let score = 0;
-  let speed = 0; // world scroll speed in px/sec
-  let spawnTimer = 0;
-  let spawnInterval = 0;
-  let elapsed = 0;
-  let shake = 0;
-  let particles = [];
-
-  const BASE_SPEED = 340;
-  const MAX_SPEED = 900;
-
-  function shipSize() {
-    const s = Math.min(laneW * 0.62, 90);
-    return { w: s, h: s * 1.25 };
-  }
-
-  function initStars() {
-    stars = [];
-    const count = Math.round((W * H) / 9000);
-    for (let i = 0; i < count; i++) {
-      stars.push({
-        x: Math.random() * W,
-        y: Math.random() * H,
-        z: Math.random() * 0.8 + 0.2, // depth → speed & size
-      });
-    }
-  }
-
-  function reset() {
-    const sz = shipSize();
-    ship.w = sz.w;
-    ship.h = sz.h;
-    ship.lane = 1;
-    ship.x = laneX[1];
-    ship.targetX = laneX[1];
-    ship.y = H - ship.h - Math.max(40, H * 0.08);
-    obstacles = [];
-    particles = [];
-    score = 0;
-    speed = BASE_SPEED;
-    elapsed = 0;
-    spawnInterval = 0.95;
-    spawnTimer = 0.4;
-    shake = 0;
-    initStars();
-  }
-
-  function startGame() {
-    reset();
-    state = STATE.PLAY;
-    startScreen.classList.add("hidden");
-    gameoverScreen.classList.add("hidden");
-    hud.classList.remove("hidden");
-  }
-
-  function gameOver() {
-    state = STATE.OVER;
-    shake = 16;
-    spawnExplosion(ship.x, ship.y + ship.h * 0.4);
-    const finalScore = Math.floor(score);
-    const isBest = finalScore > best;
-    if (isBest) {
-      best = finalScore;
-      localStorage.setItem(BEST_KEY, String(best));
-      bestEl.textContent = best;
-    }
-    finalScoreEl.textContent = finalScore;
-    finalBestEl.textContent = best;
-    newBestEl.classList.toggle("hidden", !isBest);
-    // brief delay so the explosion is visible before the overlay
-    setTimeout(() => {
-      hud.classList.add("hidden");
-      gameoverScreen.classList.remove("hidden");
-    }, 650);
-  }
-
-  // --- Controls ---
-  function moveLane(dir) {
-    if (state !== STATE.PLAY) return;
-    const next = Math.max(0, Math.min(LANES - 1, ship.lane + dir));
-    if (next !== ship.lane) {
-      ship.lane = next;
-      ship.targetX = laneX[next];
-    }
-  }
-
-  // Keyboard (desktop testing)
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowLeft" || e.key === "a") moveLane(-1);
-    else if (e.key === "ArrowRight" || e.key === "d") moveLane(1);
-    else if ((e.key === " " || e.key === "Enter") && state !== STATE.PLAY) {
-      state === STATE.MENU ? startGame() : startGame();
-    }
+// ---------------------------------------------------------------------------
+// Ship (built from primitives)
+// ---------------------------------------------------------------------------
+function buildShip() {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: 0xeaf6ff,
+    metalness: 0.5,
+    roughness: 0.3,
+    emissive: 0x0a2233,
+    emissiveIntensity: 0.4,
+  });
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: CYAN,
+    metalness: 0.4,
+    roughness: 0.4,
+    emissive: CYAN,
+    emissiveIntensity: 0.5,
   });
 
-  // Touch / pointer: swipe to move, or tap a screen half
-  let touchStartX = null;
-  let touchStartY = null;
-  let touchStartT = 0;
-  const SWIPE_MIN = 28;
+  // nose cone (points toward -z, the direction of travel)
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.7, 18), bodyMat);
+  nose.rotation.x = -Math.PI / 2;
+  nose.position.z = -0.35;
+  group.add(nose);
 
-  canvas.addEventListener(
-    "touchstart",
-    (e) => {
-      const t = e.changedTouches[0];
-      touchStartX = t.clientX;
-      touchStartY = t.clientY;
-      touchStartT = performance.now();
-    },
-    { passive: true }
+  // fuselage
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.52, 1.2, 18), bodyMat);
+  body.rotation.x = Math.PI / 2;
+  body.position.z = 0.7;
+  group.add(body);
+
+  // wings
+  const wings = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.09, 0.8), accentMat);
+  wings.position.set(0, -0.05, 0.65);
+  group.add(wings);
+  // tail fin
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.6, 0.6), accentMat);
+  fin.position.set(0, 0.3, 1.0);
+  group.add(fin);
+
+  // cockpit
+  const cockpit = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3, 18, 14),
+    new THREE.MeshStandardMaterial({ color: 0x0a2233, metalness: 0.7, roughness: 0.1 })
   );
+  cockpit.position.set(0, 0.2, 0.05);
+  cockpit.scale.set(1, 0.7, 1.5);
+  group.add(cockpit);
 
-  canvas.addEventListener(
-    "touchend",
-    (e) => {
-      if (touchStartX === null) return;
-      const t = e.changedTouches[0];
-      const dx = t.clientX - touchStartX;
-      const dy = t.clientY - touchStartY;
-      const absX = Math.abs(dx);
-      const absY = Math.abs(dy);
-
-      if (absX > SWIPE_MIN && absX > absY) {
-        moveLane(dx > 0 ? 1 : -1);
-      } else if (absX < SWIPE_MIN && absY < SWIPE_MIN) {
-        // treat as a tap on the left/right half
-        moveLane(t.clientX < W / 2 ? -1 : 1);
-      }
-      touchStartX = null;
-    },
-    { passive: true }
+  // engine glow
+  const engine = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.34, 0.3, 14),
+    new THREE.MeshBasicMaterial({ color: PINK })
   );
+  engine.rotation.x = Math.PI / 2;
+  engine.position.z = 1.35;
+  group.add(engine);
 
-  // Mouse fallback (desktop): click a screen half
-  canvas.addEventListener("mousedown", (e) => {
-    if (state === STATE.PLAY) moveLane(e.clientX < W / 2 ? -1 : 1);
+  const thruster = new THREE.PointLight(PINK, 6, 8);
+  thruster.position.set(0, 0, 1.6);
+  group.add(thruster);
+  group.userData.engine = engine;
+
+  return group;
+}
+
+const ship = buildShip();
+ship.position.set(LANE_X[1], SHIP_Y, SHIP_Z);
+scene.add(ship);
+
+const shipState = {
+  lane: 1,
+  x: LANE_X[1],
+  targetX: LANE_X[1],
+};
+
+// ---------------------------------------------------------------------------
+// Obstacles (shared geometry/material, simple pool)
+// ---------------------------------------------------------------------------
+const astGeo = new THREE.IcosahedronGeometry(0.95, 0);
+const astMat = new THREE.MeshStandardMaterial({
+  color: 0x8a7d96,
+  flatShading: true,
+  roughness: 0.9,
+  metalness: 0.1,
+  emissive: PINK,
+  emissiveIntensity: 0.12,
+});
+const obstacles = [];
+const obstaclePool = [];
+
+function getObstacle() {
+  let m = obstaclePool.pop();
+  if (!m) {
+    m = new THREE.Mesh(astGeo, astMat);
+    m.userData.spin = new THREE.Vector3();
+  }
+  scene.add(m);
+  return m;
+}
+function releaseObstacle(m) {
+  scene.remove(m);
+  obstaclePool.push(m);
+}
+
+// ---------------------------------------------------------------------------
+// Explosion particles
+// ---------------------------------------------------------------------------
+let explosion = null;
+function spawnExplosion(pos) {
+  const N = 60;
+  const pos32 = new Float32Array(N * 3);
+  const col32 = new Float32Array(N * 3);
+  const vel = [];
+  const cyan = new THREE.Color(CYAN);
+  const pink = new THREE.Color(PINK);
+  for (let i = 0; i < N; i++) {
+    pos32[i * 3] = pos.x;
+    pos32[i * 3 + 1] = pos.y;
+    pos32[i * 3 + 2] = pos.z;
+    const dir = new THREE.Vector3(
+      Math.random() - 0.5,
+      Math.random() - 0.5,
+      Math.random() - 0.5
+    ).normalize().multiplyScalar(4 + Math.random() * 10);
+    vel.push(dir);
+    const c = Math.random() < 0.5 ? cyan : pink;
+    col32[i * 3] = c.r;
+    col32[i * 3 + 1] = c.g;
+    col32[i * 3 + 2] = c.b;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos32, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col32, 3));
+  const mat = new THREE.PointsMaterial({
+    size: 0.35,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
   });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  scene.add(points);
+  explosion = { points, vel, life: 1, N };
+}
 
-  document.getElementById("play-btn").addEventListener("click", startGame);
-  document.getElementById("retry-btn").addEventListener("click", startGame);
+// ---------------------------------------------------------------------------
+// Game state
+// ---------------------------------------------------------------------------
+const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
+let state = STATE.MENU;
+let score = 0;
+let speed = BASE_SPEED;
+let elapsed = 0;
+let spawnTimer = 0;
+let spawnInterval = 1.0;
+let shake = 0;
 
-  // --- Spawning ---
-  function spawnObstacle() {
-    // Pick 1 (sometimes 2) lanes to block, never all 3 at once —
-    // there must always be an open lane to escape into.
-    const lanes = [0, 1, 2];
-    const first = lanes.splice(Math.floor(Math.random() * lanes.length), 1)[0];
-    const blocked = [first];
-    if (Math.random() < 0.28) {
-      const second = lanes[Math.floor(Math.random() * lanes.length)];
-      blocked.push(second);
+const BEST_KEY = "infinrun_best";
+let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10) || 0;
+bestEl.textContent = best;
+
+function reset() {
+  for (const o of obstacles) releaseObstacle(o);
+  obstacles.length = 0;
+  if (explosion) {
+    scene.remove(explosion.points);
+    explosion = null;
+  }
+  shipState.lane = 1;
+  shipState.x = LANE_X[1];
+  shipState.targetX = LANE_X[1];
+  ship.position.set(LANE_X[1], SHIP_Y, SHIP_Z);
+  ship.visible = true;
+  score = 0;
+  speed = BASE_SPEED;
+  elapsed = 0;
+  spawnInterval = 1.0;
+  spawnTimer = 0.5;
+  shake = 0;
+}
+
+function startGame() {
+  reset();
+  state = STATE.PLAY;
+  startScreen.classList.add("hidden");
+  gameoverScreen.classList.add("hidden");
+  hud.classList.remove("hidden");
+}
+
+function gameOver() {
+  state = STATE.OVER;
+  shake = 0.6;
+  ship.visible = false;
+  spawnExplosion(ship.position);
+  const finalScore = Math.floor(score);
+  const isBest = finalScore > best;
+  if (isBest) {
+    best = finalScore;
+    localStorage.setItem(BEST_KEY, String(best));
+    bestEl.textContent = best;
+  }
+  finalScoreEl.textContent = finalScore;
+  finalBestEl.textContent = best;
+  newBestEl.classList.toggle("hidden", !isBest);
+  setTimeout(() => {
+    hud.classList.add("hidden");
+    gameoverScreen.classList.remove("hidden");
+  }, 750);
+}
+
+// ---------------------------------------------------------------------------
+// Controls
+// ---------------------------------------------------------------------------
+function moveLane(dir) {
+  if (state !== STATE.PLAY) return;
+  const next = Math.max(0, Math.min(LANES - 1, shipState.lane + dir));
+  if (next !== shipState.lane) {
+    shipState.lane = next;
+    shipState.targetX = LANE_X[next];
+  }
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft" || e.key === "a") moveLane(-1);
+  else if (e.key === "ArrowRight" || e.key === "d") moveLane(1);
+  else if ((e.key === " " || e.key === "Enter") && state !== STATE.PLAY) startGame();
+});
+
+let touchStartX = null;
+let touchStartY = null;
+const SWIPE_MIN = 28;
+
+canvas.addEventListener(
+  "touchstart",
+  (e) => {
+    const t = e.changedTouches[0];
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+  },
+  { passive: true }
+);
+canvas.addEventListener(
+  "touchend",
+  (e) => {
+    if (touchStartX === null) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartX;
+    const dy = t.clientY - touchStartY;
+    if (Math.abs(dx) > SWIPE_MIN && Math.abs(dx) > Math.abs(dy)) {
+      moveLane(dx > 0 ? 1 : -1);
+    } else if (Math.abs(dx) < SWIPE_MIN && Math.abs(dy) < SWIPE_MIN) {
+      moveLane(t.clientX < window.innerWidth / 2 ? -1 : 1);
     }
-    const sz = Math.min(laneW * 0.6, 86);
-    blocked.forEach((lane) => {
-      obstacles.push({
-        lane,
-        x: laneX[lane],
-        y: -sz,
-        r: sz / 2,
-        spin: (Math.random() - 0.5) * 4,
-        rot: Math.random() * Math.PI * 2,
-        shape: makeAsteroidShape(),
-      });
-    });
+    touchStartX = null;
+  },
+  { passive: true }
+);
+canvas.addEventListener("mousedown", (e) => {
+  if (state === STATE.PLAY) moveLane(e.clientX < window.innerWidth / 2 ? -1 : 1);
+});
+
+document.getElementById("play-btn").addEventListener("click", startGame);
+document.getElementById("retry-btn").addEventListener("click", startGame);
+
+// ---------------------------------------------------------------------------
+// Spawning
+// ---------------------------------------------------------------------------
+function spawnObstacles() {
+  // pick 1 (sometimes 2) lanes, never all 3 — always leave an escape route
+  const lanes = [0, 1, 2];
+  const first = lanes.splice(Math.floor(Math.random() * lanes.length), 1)[0];
+  const chosen = [first];
+  if (Math.random() < 0.3) chosen.push(lanes[Math.floor(Math.random() * lanes.length)]);
+
+  for (const lane of chosen) {
+    const m = getObstacle();
+    const s = 0.7 + Math.random() * 0.7;
+    m.scale.setScalar(s);
+    m.position.set(LANE_X[lane], 0.9, SPAWN_Z);
+    m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+    m.userData.spin.set(
+      (Math.random() - 0.5) * 2,
+      (Math.random() - 0.5) * 2,
+      (Math.random() - 0.5) * 2
+    );
+    m.userData.radius = 0.95 * s;
+    obstacles.push(m);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
+function update(dt) {
+  const moveSpeed = state === STATE.PLAY ? speed : BASE_SPEED * 0.6;
+
+  // scroll the track texture + starfield for a sense of motion
+  gridTex.offset.y -= moveSpeed * dt * 0.05;
+  const sp = stars.geometry.attributes.position.array;
+  for (let i = 0; i < STAR_COUNT; i++) {
+    sp[i * 3 + 2] += moveSpeed * dt;
+    if (sp[i * 3 + 2] > DESPAWN_Z) placeStar(i, false);
+  }
+  stars.geometry.attributes.position.needsUpdate = true;
+
+  // engine flicker
+  const eng = ship.userData.engine;
+  eng.scale.z = 1 + Math.sin(performance.now() / 50) * 0.35;
+
+  if (explosion) {
+    explosion.life -= dt;
+    const ep = explosion.points.geometry.attributes.position.array;
+    for (let i = 0; i < explosion.N; i++) {
+      ep[i * 3] += explosion.vel[i].x * dt;
+      ep[i * 3 + 1] += explosion.vel[i].y * dt;
+      ep[i * 3 + 2] += explosion.vel[i].z * dt;
+    }
+    explosion.points.geometry.attributes.position.needsUpdate = true;
+    explosion.points.material.opacity = Math.max(0, explosion.life);
+    if (explosion.life <= 0) {
+      scene.remove(explosion.points);
+      explosion = null;
+    }
   }
 
-  function makeAsteroidShape() {
-    const points = [];
-    const n = 9;
-    for (let i = 0; i < n; i++) {
-      points.push(0.78 + Math.random() * 0.32);
-    }
-    return points;
+  // camera shake decay
+  if (shake > 0) {
+    shake = Math.max(0, shake - dt);
+    camera.position.set(
+      CAM_BASE.x + (Math.random() - 0.5) * shake,
+      CAM_BASE.y + (Math.random() - 0.5) * shake,
+      CAM_BASE.z
+    );
+  } else {
+    camera.position.copy(CAM_BASE);
   }
 
-  function spawnExplosion(x, y) {
-    for (let i = 0; i < 26; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = 80 + Math.random() * 320;
-      particles.push({
-        x,
-        y,
-        vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp,
-        life: 0.6 + Math.random() * 0.4,
-        max: 1,
-        size: 2 + Math.random() * 4,
-        hue: Math.random() < 0.5 ? "#36e0ff" : "#ff4d8d",
-      });
-    }
-  }
-
-  // --- Update ---
-  function update(dt) {
-    // stars always drift
-    const starSpeed = state === STATE.PLAY ? speed : BASE_SPEED * 0.5;
-    for (const s of stars) {
-      s.y += starSpeed * s.z * dt;
-      if (s.y > H) {
-        s.y = -2;
-        s.x = Math.random() * W;
-      }
-    }
-
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i];
-      p.life -= dt;
-      if (p.life <= 0) {
-        particles.splice(i, 1);
-        continue;
-      }
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vx *= 0.96;
-      p.vy *= 0.96;
-    }
-
-    if (shake > 0) shake = Math.max(0, shake - dt * 60);
-
-    if (state !== STATE.PLAY) return;
-
+  if (state === STATE.PLAY) {
     elapsed += dt;
     score += dt * 10 + (speed / BASE_SPEED) * dt * 4;
     scoreEl.textContent = Math.floor(score);
 
-    // ramp difficulty
-    speed = Math.min(MAX_SPEED, BASE_SPEED + elapsed * 18);
-    spawnInterval = Math.max(0.42, 0.95 - elapsed * 0.012);
+    speed = Math.min(MAX_SPEED, BASE_SPEED + elapsed * 1.6);
+    spawnInterval = Math.max(0.45, 1.0 - elapsed * 0.012);
 
-    // ease ship toward target lane
-    ship.x += (ship.targetX - ship.x) * Math.min(1, dt * 14);
-
-    // spawn
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
-      spawnObstacle();
+      spawnObstacles();
       spawnTimer = spawnInterval;
     }
+  }
 
-    // move obstacles + collision
-    for (let i = obstacles.length - 1; i >= 0; i--) {
-      const o = obstacles[i];
-      o.y += speed * dt;
-      o.rot += o.spin * dt;
-      if (o.y - o.r > H) {
-        obstacles.splice(i, 1);
-        continue;
-      }
-      if (hit(o)) {
+  // ease ship toward target lane + bank into the turn
+  shipState.x += (shipState.targetX - shipState.x) * Math.min(1, dt * 12);
+  ship.position.x = shipState.x;
+  ship.position.y = SHIP_Y + Math.sin(performance.now() / 350) * 0.06;
+  const drift = shipState.targetX - shipState.x;
+  ship.rotation.z = THREE.MathUtils.clamp(-drift * 0.5, -0.6, 0.6);
+  ship.rotation.y = THREE.MathUtils.clamp(-drift * 0.12, -0.2, 0.2);
+
+  // move obstacles toward the camera + collision
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.position.z += moveSpeed * dt;
+    o.rotation.x += o.userData.spin.x * dt;
+    o.rotation.y += o.userData.spin.y * dt;
+    o.rotation.z += o.userData.spin.z * dt;
+
+    if (o.position.z > DESPAWN_Z) {
+      releaseObstacle(o);
+      obstacles.splice(i, 1);
+      continue;
+    }
+    if (state === STATE.PLAY) {
+      const dx = Math.abs(o.position.x - ship.position.x);
+      const dz = Math.abs(o.position.z - SHIP_Z);
+      if (dz < 0.9 + o.userData.radius && dx < 0.9 + o.userData.radius * 0.5) {
         gameOver();
-        return;
+        break;
       }
     }
   }
+}
 
-  function hit(o) {
-    // circle (obstacle) vs the ship's tighter hit-box
-    const hbW = ship.w * 0.62;
-    const hbH = ship.h * 0.72;
-    const left = ship.x - hbW / 2;
-    const right = ship.x + hbW / 2;
-    const top = ship.y + (ship.h - hbH) / 2;
-    const bottom = top + hbH;
-    const cx = Math.max(left, Math.min(o.x, right));
-    const cy = Math.max(top, Math.min(o.y, bottom));
-    const dx = o.x - cx;
-    const dy = o.y - cy;
-    return dx * dx + dy * dy < o.r * 0.82 * (o.r * 0.82);
-  }
+// ---------------------------------------------------------------------------
+// Resize + loop
+// ---------------------------------------------------------------------------
+function resize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
 
-  // --- Render ---
-  function draw() {
-    ctx.save();
-    if (shake > 0) {
-      ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
-    }
-
-    // background
-    ctx.fillStyle = "#05060f";
-    ctx.fillRect(-30, -30, W + 60, H + 60);
-
-    drawLanes();
-    drawStars();
-
-    for (const o of obstacles) drawAsteroid(o);
-
-    if (state === STATE.PLAY || state === STATE.MENU) drawShip();
-
-    drawParticles();
-
-    ctx.restore();
-  }
-
-  function drawLanes() {
-    ctx.save();
-    ctx.strokeStyle = "rgba(54,224,255,0.10)";
-    ctx.lineWidth = 2;
-    for (let i = 1; i < LANES; i++) {
-      const x = laneW * i;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, H);
-      ctx.stroke();
-    }
-    // soft glow at the player row
-    const grad = ctx.createLinearGradient(0, H, 0, H * 0.6);
-    grad.addColorStop(0, "rgba(54,224,255,0.08)");
-    grad.addColorStop(1, "rgba(54,224,255,0)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, H * 0.6, W, H * 0.4);
-    ctx.restore();
-  }
-
-  function drawStars() {
-    for (const s of stars) {
-      const size = s.z * 2.2;
-      ctx.fillStyle = `rgba(255,255,255,${0.25 + s.z * 0.6})`;
-      ctx.fillRect(s.x, s.y, size, size + s.z * 4);
-    }
-  }
-
-  function drawShip() {
-    const { x, y, w, h } = ship;
-    ctx.save();
-    ctx.translate(x, y + h / 2);
-
-    // thruster flame
-    const flame = 14 + Math.sin(performance.now() / 40) * 6;
-    const fg = ctx.createLinearGradient(0, h / 2, 0, h / 2 + flame + 18);
-    fg.addColorStop(0, "rgba(255,210,80,0.9)");
-    fg.addColorStop(1, "rgba(255,77,141,0)");
-    ctx.fillStyle = fg;
-    ctx.beginPath();
-    ctx.moveTo(-w * 0.18, h * 0.45);
-    ctx.lineTo(0, h * 0.45 + flame + 18);
-    ctx.lineTo(w * 0.18, h * 0.45);
-    ctx.closePath();
-    ctx.fill();
-
-    // body
-    ctx.fillStyle = "#dff6ff";
-    ctx.strokeStyle = "#36e0ff";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(0, -h / 2); // nose
-    ctx.quadraticCurveTo(w * 0.5, h * 0.1, w * 0.3, h * 0.42);
-    ctx.lineTo(-w * 0.3, h * 0.42);
-    ctx.quadraticCurveTo(-w * 0.5, h * 0.1, 0, -h / 2);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // wings
-    ctx.fillStyle = "#36e0ff";
-    ctx.beginPath();
-    ctx.moveTo(w * 0.28, h * 0.12);
-    ctx.lineTo(w * 0.52, h * 0.42);
-    ctx.lineTo(w * 0.26, h * 0.4);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(-w * 0.28, h * 0.12);
-    ctx.lineTo(-w * 0.52, h * 0.42);
-    ctx.lineTo(-w * 0.26, h * 0.4);
-    ctx.closePath();
-    ctx.fill();
-
-    // cockpit
-    ctx.fillStyle = "#0a2233";
-    ctx.beginPath();
-    ctx.ellipse(0, -h * 0.06, w * 0.13, h * 0.18, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  function drawAsteroid(o) {
-    ctx.save();
-    ctx.translate(o.x, o.y);
-    ctx.rotate(o.rot);
-    ctx.beginPath();
-    const n = o.shape.length;
-    for (let i = 0; i < n; i++) {
-      const ang = (i / n) * Math.PI * 2;
-      const rr = o.r * o.shape[i];
-      const px = Math.cos(ang) * rr;
-      const py = Math.sin(ang) * rr;
-      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fillStyle = "#6b5e74";
-    ctx.fill();
-    ctx.strokeStyle = "#ff4d8d";
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-    // crater detail
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    ctx.beginPath();
-    ctx.arc(o.r * 0.2, -o.r * 0.15, o.r * 0.22, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function drawParticles() {
-    for (const p of particles) {
-      ctx.globalAlpha = Math.max(0, p.life / p.max);
-      ctx.fillStyle = p.hue;
-      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  // --- Loop ---
-  let last = performance.now();
-  function frame(now) {
-    let dt = (now - last) / 1000;
-    last = now;
-    if (dt > 0.05) dt = 0.05; // clamp after tab switches
-    update(dt);
-    draw();
-    requestAnimationFrame(frame);
-  }
-
-  // make sure ship has a sane initial position for the menu preview
-  reset();
-  state = STATE.MENU;
+const clock = new THREE.Clock();
+function frame() {
+  let dt = clock.getDelta();
+  if (dt > 0.05) dt = 0.05; // clamp after tab switches
+  update(dt);
+  renderer.render(scene, camera);
   requestAnimationFrame(frame);
-})();
+}
+frame();
+
+// signal to index.html that the 3D engine loaded successfully
+window.__INFINRUN_READY = true;

@@ -1,8 +1,9 @@
 # InfinRun 🚀
 
-A 3-lane spaceship infinite runner, built mobile-first as a zero-dependency web app.
-Dodge incoming asteroids by swiping (or tapping the screen sides) to switch lanes.
-The longer you survive, the faster it gets.
+A 3-lane spaceship infinite runner in **real 3D** (Subway-Surfers style), built
+mobile-first. A chase camera follows your ship down a neon track while asteroids
+rush toward you — swipe (or tap the screen sides) to switch lanes. The longer you
+survive, the faster it gets.
 
 **Play:** https://whtspc.github.io/infinrun/
 
@@ -13,14 +14,22 @@ The longer you survive, the faster it gets.
 
 ## Tech
 
-Plain HTML + CSS + Canvas 2D — no frameworks, no build step. Everything is static:
+WebGL 3D via [Three.js](https://threejs.org/), with plain HTML/CSS for the UI —
+no build step. Three.js is loaded at runtime from a CDN through an
+[import map](https://developer.mozilla.org/docs/Web/HTML/Element/script/type/importmap)
+in `index.html`, so the project stays a static site.
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | Markup + HUD / overlays |
+| `index.html` | Markup, HUD / overlays, Three.js import map |
 | `style.css` | Layout and neon UI styling |
-| `game.js` | Game loop, input, spawning, rendering |
+| `game.js` | ES module: 3D scene, game loop, input, spawning |
 | `manifest.webmanifest` + `icon.svg` | Add-to-home-screen / installable PWA |
+
+> **Removing the runtime CDN dependency (optional):** download
+> `three.module.min.js` into a `vendor/` folder and change the import map's
+> `"three"` entry to `"./vendor/three.module.js"`. Then the site needs no
+> third-party requests at all.
 
 ## Run locally
 
