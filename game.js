@@ -430,7 +430,7 @@ function update(dt) {
   const moveSpeed = state === STATE.PLAY ? speed : BASE_SPEED * 0.6;
 
   // scroll the track texture + starfield for a sense of motion
-  gridTex.offset.y -= moveSpeed * dt * 0.05;
+  gridTex.offset.y += moveSpeed * dt * 0.05;
   const sp = stars.geometry.attributes.position.array;
   for (let i = 0; i < STAR_COUNT; i++) {
     sp[i * 3 + 2] += moveSpeed * dt;
