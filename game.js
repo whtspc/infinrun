@@ -17,6 +17,7 @@ const newBestEl = document.getElementById("new-best");
 const mathbar = document.getElementById("mathbar");
 const targetsContainer = document.getElementById("targets");
 const exprEl = document.getElementById("expr");
+const timeEl = document.getElementById("time");
 
 // ---------------------------------------------------------------------------
 // Constants / world layout
@@ -31,6 +32,9 @@ const DESPAWN_Z = 8; // ...and are recycled once they pass the camera
 
 const BASE_SPEED = 20; // world units / second
 const MAX_SPEED = 30; // gentle ceiling — you need time to scan the targets
+
+const START_TIME = 60; // seconds on the clock at the start of a run
+const TIME_BONUS = 15; // seconds added per target solved
 
 // Track curvature (purely visual). bend() returns a sideways offset that is
 // ~0 at the ship's depth and grows with distance ahead, so the road appears
@@ -102,6 +106,9 @@ function makeGridTexture() {
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(1, 60);
+  // the road is viewed at a grazing angle; without anisotropy the grid blurs
+  // into a smear near the horizon
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   return tex;
 }
 
@@ -396,18 +403,20 @@ function spawnExplosion(pos, colorA = CYAN, colorB = PINK) {
 // ---------------------------------------------------------------------------
 const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
 let state = STATE.MENU;
-let score = 0;
 let speed = BASE_SPEED;
 let elapsed = 0;
 let spawnTimer = 0;
 let spawnInterval = 1.2;
 let shake = 0;
-let solves = 0;
+let solves = 0; // targets solved this run = the score
+let timeLeft = 0; // seconds remaining
+let beatBest = false; // did this run set a new best
 const TARGET_COUNT = 5;
 let targets = [];
 let targetEls = [];
 
-const BEST_KEY = "infinrun_best";
+// new key so an old (corrupted, float) "best" from earlier builds is ignored
+const BEST_KEY = "infinrun_solves_best";
 let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10) || 0;
 bestEl.textContent = best;
 
@@ -458,11 +467,18 @@ function pickTargets() {
   for (let i = 0; i < TARGET_COUNT; i++) targetEls[i].textContent = targets[i];
 }
 
-function flashExpr(good) {
+function flashExpr() {
   if (!exprEl) return;
   exprEl.classList.remove("flash-good");
   void exprEl.offsetWidth; // restart the animation
   exprEl.classList.add("flash-good");
+}
+
+function flashTime() {
+  if (!timeEl) return;
+  timeEl.classList.remove("time-bonus");
+  void timeEl.offsetWidth;
+  timeEl.classList.add("time-bonus");
 }
 
 function updateMathHud() {
@@ -470,17 +486,26 @@ function updateMathHud() {
   exprEl.textContent = String(expr.total);
 }
 
+function updateTimeHud() {
+  if (!timeEl) return;
+  timeEl.textContent = Math.ceil(timeLeft);
+  timeEl.classList.toggle("low", timeLeft <= 10);
+}
+
 // returns true if the current total matched (and replaced) a target
 function trySolve() {
   const idx = targets.indexOf(expr.total);
   if (idx === -1) return false;
   solves += 1;
-  score += 100 + Math.floor(elapsed); // small time bonus
-  scoreEl.textContent = score;
-  if (score > best) {
-    best = score;
+  scoreEl.textContent = solves;
+  timeLeft += TIME_BONUS;
+  updateTimeHud();
+  flashTime();
+  if (solves > best) {
+    best = solves;
     localStorage.setItem(BEST_KEY, String(best));
     bestEl.textContent = best;
+    beatBest = true;
   }
   spawnExplosion(ship.position, CYAN, 0xffd84d);
   flashExpr();
@@ -516,12 +541,13 @@ function reset() {
   shipState.targetX = LANE_X[1];
   ship.position.set(LANE_X[1], SHIP_Y, SHIP_Z);
   ship.visible = true;
-  score = 0;
+  solves = 0;
   scoreEl.textContent = 0;
+  timeLeft = START_TIME;
+  beatBest = false;
   speed = BASE_SPEED;
   elapsed = 0;
   traveled = 0;
-  solves = 0;
   spawnInterval = 1.2;
   spawnTimer = 0.6;
   shake = 0;
@@ -529,6 +555,7 @@ function reset() {
   if (targetEls.length === 0) buildTargetChips();
   pickTargets();
   updateMathHud();
+  updateTimeHud();
 }
 
 function startGame() {
@@ -541,20 +568,14 @@ function startGame() {
 }
 
 function gameOver() {
+  if (state === STATE.OVER) return;
   state = STATE.OVER;
   shake = 0.6;
   ship.visible = false;
   spawnExplosion(ship.position);
-  const finalScore = Math.floor(score);
-  const isBest = finalScore > best;
-  if (isBest) {
-    best = finalScore;
-    localStorage.setItem(BEST_KEY, String(best));
-    bestEl.textContent = best;
-  }
-  finalScoreEl.textContent = finalScore;
+  finalScoreEl.textContent = solves;
   finalBestEl.textContent = best;
-  newBestEl.classList.toggle("hidden", !isBest);
+  newBestEl.classList.toggle("hidden", !beatBest);
   setTimeout(() => {
     hud.classList.add("hidden");
     mathbar.classList.add("hidden");
@@ -707,8 +728,12 @@ function update(dt) {
 
   if (state === STATE.PLAY) {
     elapsed += dt;
-    score += dt * 10 + (speed / BASE_SPEED) * dt * 4;
-    scoreEl.textContent = Math.floor(score);
+    timeLeft -= dt;
+    updateTimeHud();
+    if (timeLeft <= 0) {
+      timeLeft = 0;
+      gameOver();
+    }
 
     speed = Math.min(MAX_SPEED, BASE_SPEED + elapsed * 0.18);
     spawnInterval = Math.max(0.8, 1.2 - elapsed * 0.004);

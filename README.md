@@ -9,6 +9,8 @@ number — then it gives you a new one. Swipe to pick which token you grab.
 
 ## How to play
 
+- You start with **60 seconds on the clock**. Each target you solve adds **+15s**;
+  when the clock hits 0 the run ends. Your **score is how many targets you solved**.
 - **Five TARGET** numbers are shown at the top. Steer your running total onto
   **any** of them to score it — that one is replaced with a fresh target.
 - Each token is a whole move — an operator combined with an integer, e.g. `+3`,

@@ -39,8 +39,12 @@
     <!-- HUD -->
     <div id="hud" class="hidden">
       <div class="hud-score">
-        <span class="hud-label">SCORE</span>
+        <span class="hud-label">SOLVED</span>
         <span id="score">0</span>
+      </div>
+      <div class="hud-clock">
+        <span class="hud-label">TIME</span>
+        <span id="time">60</span>
       </div>
       <div class="hud-best">
         <span class="hud-label">BEST</span>
@@ -58,13 +62,13 @@
     <!-- Start screen -->
     <div id="start" class="overlay">
       <h1>INFIN<span>RUN</span></h1>
-      <p class="tagline">build the number</p>
+      <p class="tagline">race the clock</p>
       <button id="play-btn" class="btn">TAP TO LAUNCH</button>
       <p class="hint">
-        Fly into moves like <b>+3</b>, <b>×4</b>, <b>/2</b> to steer your total
-        onto <b>any</b> of the targets.<br />Swipe&nbsp;◀&nbsp;▶ or tap the screen
-        sides; an <b>empty lane</b> lets you skip.<br /><b>/</b> always works and
-        rounds down (e.g. 7 / 2 = 3).
+        Fly into moves like <b>+3</b>, <b>×4</b>, <b>/2</b> to land your total on
+        <b>any</b> target. Each one buys <b>+15s</b>.<br />Swipe&nbsp;◀&nbsp;▶ or
+        tap the screen sides; an <b>empty lane</b> skips.<br /><b>/</b> rounds down
+        (7 / 2 = 3). Clock hits 0 — you're done.
       </p>
     </div>
 
@@ -72,7 +76,7 @@
     <div id="gameover" class="overlay hidden">
       <h2>GAME OVER</h2>
       <div class="final">
-        <div><span class="hud-label">SCORE</span><strong id="final-score">0</strong></div>
+        <div><span class="hud-label">SOLVED</span><strong id="final-score">0</strong></div>
         <div><span class="hud-label">BEST</span><strong id="final-best">0</strong></div>
       </div>
       <p id="new-best" class="new-best hidden">★ NEW BEST! ★</p>

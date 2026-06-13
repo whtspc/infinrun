@@ -62,13 +62,42 @@ body {
 
 #hud span:not(.hud-label),
 #hud > div {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
+}
+
+.hud-clock {
+  text-align: center;
 }
 
 .hud-best {
   text-align: right;
   color: var(--accent);
+}
+
+#time {
+  display: inline-block;
+  color: #36ffa6;
+  text-shadow: 0 0 16px rgba(54, 255, 166, 0.5);
+}
+
+#time.low {
+  color: #ff4d4d;
+  text-shadow: 0 0 18px rgba(255, 77, 77, 0.8);
+  animation: lowPulse 0.8s ease-in-out infinite;
+}
+
+#time.time-bonus {
+  animation: timeBonus 0.5s ease-out;
+}
+
+@keyframes lowPulse {
+  50% { opacity: 0.45; }
+}
+
+@keyframes timeBonus {
+  0% { transform: scale(1.5); color: #ffffff; }
+  100% { transform: scale(1); }
 }
 
 /* ---------- Math HUD ---------- */
