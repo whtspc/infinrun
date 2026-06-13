@@ -48,12 +48,26 @@
       </div>
     </div>
 
+    <!-- Math HUD: the target to build and your running expression -->
+    <div id="mathbar" class="hidden">
+      <div class="target-row">
+        <span class="hud-label">TARGET</span>
+        <span id="target">0</span>
+      </div>
+      <div id="expr">·</div>
+    </div>
+
     <!-- Start screen -->
     <div id="start" class="overlay">
       <h1>INFIN<span>RUN</span></h1>
-      <p class="tagline">3-lane spaceship dash</p>
+      <p class="tagline">build the number</p>
       <button id="play-btn" class="btn">TAP TO LAUNCH</button>
-      <p class="hint">Swipe&nbsp;◀&nbsp;▶&nbsp; or tap the screen sides to change lanes</p>
+      <p class="hint">
+        Fly into <b>digits</b> and <b>operators</b> to build the
+        <b>TARGET</b>.<br />Swipe&nbsp;◀&nbsp;▶ or tap the screen sides to switch
+        lanes — empty lanes let you skip a token.<br />A ÷ that won't divide
+        evenly resets your sum.
+      </p>
     </div>
 
     <!-- Game over screen -->

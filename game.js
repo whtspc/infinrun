@@ -14,6 +14,9 @@ const gameoverScreen = document.getElementById("gameover");
 const finalScoreEl = document.getElementById("final-score");
 const finalBestEl = document.getElementById("final-best");
 const newBestEl = document.getElementById("new-best");
+const mathbar = document.getElementById("mathbar");
+const targetEl = document.getElementById("target");
+const exprEl = document.getElementById("expr");
 
 // ---------------------------------------------------------------------------
 // Constants / world layout
@@ -23,11 +26,11 @@ const LANE_X = [-2.4, 0, 2.4]; // x position of each lane
 const SHIP_Z = -3.5; // ship sits a bit down the track so side lanes stay on-screen
 const SHIP_Y = 0.6;
 const FLOOR_Y = -0.2;
-const SPAWN_Z = -150; // obstacles appear this far ahead
+const SPAWN_Z = -150; // tokens appear this far ahead
 const DESPAWN_Z = 8; // ...and are recycled once they pass the camera
 
-const BASE_SPEED = 26; // world units / second
-const MAX_SPEED = 78;
+const BASE_SPEED = 22; // world units / second
+const MAX_SPEED = 50; // capped lower than the dodger — you need time to read tokens
 
 // Track curvature (purely visual). bend() returns a sideways offset that is
 // ~0 at the ship's depth and grows with distance ahead, so the road appears
@@ -266,45 +269,78 @@ const shipState = {
 };
 
 // ---------------------------------------------------------------------------
-// Obstacles (shared geometry/material, simple pool)
+// Math tokens (digits + operators) — billboard glyph panels, pooled
 // ---------------------------------------------------------------------------
-const astGeo = new THREE.IcosahedronGeometry(0.95, 0);
-const astMat = new THREE.MeshStandardMaterial({
-  color: 0x8a7d96,
-  flatShading: true,
-  roughness: 0.9,
-  metalness: 0.1,
-  emissive: PINK,
-  emissiveIntensity: 0.12,
-});
-const obstacles = [];
-const obstaclePool = [];
+const OP_SYMBOL = { "+": "+", "-": "−", "*": "×", "/": "÷" };
+const tokenGeo = new THREE.PlaneGeometry(1.5, 1.5);
+const glyphCache = new Map(); // label -> CanvasTexture
 
-function getObstacle() {
-  let m = obstaclePool.pop();
+function glyphTexture(label, isOp) {
+  const key = (isOp ? "op:" : "n:") + label;
+  if (glyphCache.has(key)) return glyphCache.get(key);
+  const c = document.createElement("canvas");
+  c.width = c.height = 192;
+  const g = c.getContext("2d");
+  const accent = isOp ? "#ffd84d" : "#36e0ff";
+  // rounded neon panel
+  const r = 34;
+  g.lineWidth = 9;
+  g.strokeStyle = accent;
+  g.fillStyle = "rgba(8,14,28,0.82)";
+  g.beginPath();
+  g.moveTo(24 + r, 24);
+  g.arcTo(168, 24, 168, 168, r);
+  g.arcTo(168, 168, 24, 168, r);
+  g.arcTo(24, 168, 24, 24, r);
+  g.arcTo(24, 24, 168, 24, r);
+  g.closePath();
+  g.fill();
+  g.stroke();
+  // glyph
+  g.fillStyle = accent;
+  g.font = "bold 120px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.shadowColor = accent;
+  g.shadowBlur = 18;
+  g.fillText(label, 96, 104);
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  glyphCache.set(key, tex);
+  return tex;
+}
+
+const tokens = [];
+const tokenPool = [];
+
+function getToken() {
+  let m = tokenPool.pop();
   if (!m) {
-    m = new THREE.Mesh(astGeo, astMat);
-    m.userData.spin = new THREE.Vector3();
+    m = new THREE.Mesh(
+      tokenGeo,
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
+    );
   }
   scene.add(m);
   return m;
 }
-function releaseObstacle(m) {
+function releaseToken(m) {
   scene.remove(m);
-  obstaclePool.push(m);
+  tokenPool.push(m);
 }
 
 // ---------------------------------------------------------------------------
 // Explosion particles
 // ---------------------------------------------------------------------------
 let explosion = null;
-function spawnExplosion(pos) {
+function spawnExplosion(pos, colorA = CYAN, colorB = PINK) {
   const N = 60;
   const pos32 = new Float32Array(N * 3);
   const col32 = new Float32Array(N * 3);
   const vel = [];
-  const cyan = new THREE.Color(CYAN);
-  const pink = new THREE.Color(PINK);
+  const ca = new THREE.Color(colorA);
+  const cb = new THREE.Color(colorB);
   for (let i = 0; i < N; i++) {
     pos32[i * 3] = pos.x;
     pos32[i * 3 + 1] = pos.y;
@@ -315,7 +351,7 @@ function spawnExplosion(pos) {
       Math.random() - 0.5
     ).normalize().multiplyScalar(4 + Math.random() * 10);
     vel.push(dir);
-    const c = Math.random() < 0.5 ? cyan : pink;
+    const c = Math.random() < 0.5 ? ca : cb;
     col32[i * 3] = c.r;
     col32[i * 3 + 1] = c.g;
     col32[i * 3 + 2] = c.b;
@@ -345,16 +381,125 @@ let score = 0;
 let speed = BASE_SPEED;
 let elapsed = 0;
 let spawnTimer = 0;
-let spawnInterval = 1.0;
+let spawnInterval = 1.2;
 let shake = 0;
+let solves = 0;
+let target = 0;
 
 const BEST_KEY = "infinrun_best";
 let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10) || 0;
 bestEl.textContent = best;
 
+// --- Expression engine: a live, left-to-right calculator (no precedence) ---
+// total: committed result; op: pending operator; building: number being typed
+const expr = { total: null, op: null, building: null };
+
+function applyOp(a, op, b) {
+  if (op === "+") return a + b;
+  if (op === "-") return a - b;
+  if (op === "*") return a * b;
+  if (op === "/") return a / b;
+  return b;
+}
+
+// the value the player is currently "holding" (includes the un-committed number)
+function liveValue() {
+  if (expr.building === null) return expr.total;
+  if (expr.total === null) return expr.building;
+  return applyOp(expr.total, expr.op, expr.building);
+}
+
+function resetExpr() {
+  expr.total = null;
+  expr.op = null;
+  expr.building = null;
+}
+
+function pickTarget() {
+  const max = Math.min(99, 12 + solves * 4);
+  target = 2 + Math.floor(Math.random() * (max - 1));
+  if (targetEl) targetEl.textContent = target;
+}
+
+function flashExpr(bad) {
+  if (!exprEl) return;
+  exprEl.classList.remove("flash-bad", "flash-good");
+  void exprEl.offsetWidth; // restart the animation
+  exprEl.classList.add(bad ? "flash-bad" : "flash-good");
+}
+
+function updateMathHud() {
+  if (!exprEl) return;
+  let s = "";
+  if (expr.total !== null) s += expr.total;
+  if (expr.op !== null) s += " " + OP_SYMBOL[expr.op] + " ";
+  if (expr.building !== null) s += expr.building;
+  const v = liveValue();
+  if (s === "") s = "·";
+  else if (v !== null) s += "  =  " + v;
+  exprEl.textContent = s;
+}
+
+function onTargetHit() {
+  solves += 1;
+  score += 100 + Math.floor(elapsed); // small time bonus
+  scoreEl.textContent = score;
+  if (score > best) {
+    best = score;
+    localStorage.setItem(BEST_KEY, String(best));
+    bestEl.textContent = best;
+  }
+  spawnExplosion(ship.position, CYAN, 0xffd84d);
+  flashExpr(false);
+  resetExpr();
+  pickTarget();
+  updateMathHud();
+}
+
+function afterCollect() {
+  updateMathHud();
+  const v = liveValue();
+  if (v !== null && Number.isInteger(v) && v === target) onTargetHit();
+}
+
+function collectDigit(d) {
+  expr.building = expr.building === null ? d : Math.min(expr.building * 10 + d, 9999);
+  afterCollect();
+}
+
+function collectOperator(op) {
+  // commit the number being typed using the previously-pending operator
+  if (expr.building !== null) {
+    if (expr.total === null) {
+      expr.total = expr.building;
+    } else if (expr.op === "/") {
+      if (expr.building === 0 || expr.total % expr.building !== 0) {
+        // illegal division → reset the expression (forgiving), with a cue
+        resetExpr();
+        flashExpr(true);
+        shake = Math.max(shake, 0.25);
+        updateMathHud();
+        return;
+      }
+      expr.total = expr.total / expr.building;
+    } else {
+      expr.total = applyOp(expr.total, expr.op, expr.building);
+    }
+    expr.building = null;
+  }
+  // a leading operator (no number yet) is ignored
+  if (expr.total !== null) expr.op = op;
+  afterCollect();
+}
+
+function collectToken(data) {
+  if (data.isOp) collectOperator(data.op);
+  else collectDigit(data.digit);
+}
+
 function reset() {
-  for (const o of obstacles) releaseObstacle(o);
-  obstacles.length = 0;
+  for (const t of tokens) releaseToken(t);
+  tokens.length = 0;
   if (explosion) {
     scene.remove(explosion.points);
     explosion = null;
@@ -365,12 +510,17 @@ function reset() {
   ship.position.set(LANE_X[1], SHIP_Y, SHIP_Z);
   ship.visible = true;
   score = 0;
+  scoreEl.textContent = 0;
   speed = BASE_SPEED;
   elapsed = 0;
   traveled = 0;
-  spawnInterval = 1.0;
-  spawnTimer = 0.5;
+  solves = 0;
+  spawnInterval = 1.2;
+  spawnTimer = 0.6;
   shake = 0;
+  resetExpr();
+  pickTarget();
+  updateMathHud();
 }
 
 function startGame() {
@@ -379,6 +529,7 @@ function startGame() {
   startScreen.classList.add("hidden");
   gameoverScreen.classList.add("hidden");
   hud.classList.remove("hidden");
+  mathbar.classList.remove("hidden");
 }
 
 function gameOver() {
@@ -398,6 +549,7 @@ function gameOver() {
   newBestEl.classList.toggle("hidden", !isBest);
   setTimeout(() => {
     hud.classList.add("hidden");
+    mathbar.classList.add("hidden");
     gameoverScreen.classList.remove("hidden");
   }, 750);
 }
@@ -459,27 +611,34 @@ document.getElementById("retry-btn").addEventListener("click", startGame);
 // ---------------------------------------------------------------------------
 // Spawning
 // ---------------------------------------------------------------------------
-function spawnObstacles() {
-  // pick 1 (sometimes 2) lanes, never all 3 — always leave an escape route
+function randomTokenData() {
+  // ~60% digit, ~40% operator
+  if (Math.random() < 0.6) {
+    return { isOp: false, digit: Math.floor(Math.random() * 10), label: null };
+  }
+  const ops = ["+", "-", "*", "/"];
+  const op = ops[Math.floor(Math.random() * ops.length)];
+  return { isOp: true, op, label: OP_SYMBOL[op] };
+}
+
+function spawnTokens() {
+  // pick 1 (sometimes 2) lanes, never all 3 — always leave a lane to skip into
   const lanes = [0, 1, 2];
   const first = lanes.splice(Math.floor(Math.random() * lanes.length), 1)[0];
   const chosen = [first];
-  if (Math.random() < 0.3) chosen.push(lanes[Math.floor(Math.random() * lanes.length)]);
+  if (Math.random() < 0.55) chosen.push(lanes[Math.floor(Math.random() * lanes.length)]);
 
   for (const lane of chosen) {
-    const m = getObstacle();
-    const s = 0.7 + Math.random() * 0.7;
-    m.scale.setScalar(s);
+    const data = randomTokenData();
+    const label = data.isOp ? data.label : String(data.digit);
+    const m = getToken();
+    m.material.map = glyphTexture(label, data.isOp);
+    m.material.needsUpdate = true;
     m.userData.lane = lane;
-    m.position.set(LANE_X[lane] + bendX(SPAWN_Z), 0.9, SPAWN_Z);
-    m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
-    m.userData.spin.set(
-      (Math.random() - 0.5) * 2,
-      (Math.random() - 0.5) * 2,
-      (Math.random() - 0.5) * 2
-    );
-    m.userData.radius = 0.95 * s;
-    obstacles.push(m);
+    m.userData.data = data;
+    m.userData.done = false;
+    m.position.set(LANE_X[lane] + bendX(SPAWN_Z), 0.95, SPAWN_Z);
+    tokens.push(m);
   }
 }
 
@@ -544,12 +703,12 @@ function update(dt) {
     score += dt * 10 + (speed / BASE_SPEED) * dt * 4;
     scoreEl.textContent = Math.floor(score);
 
-    speed = Math.min(MAX_SPEED, BASE_SPEED + elapsed * 1.6);
-    spawnInterval = Math.max(0.45, 1.0 - elapsed * 0.012);
+    speed = Math.min(MAX_SPEED, BASE_SPEED + elapsed * 0.9);
+    spawnInterval = Math.max(0.7, 1.2 - elapsed * 0.006);
 
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
-      spawnObstacles();
+      spawnTokens();
       spawnTimer = spawnInterval;
     }
   }
@@ -562,27 +721,26 @@ function update(dt) {
   ship.rotation.z = THREE.MathUtils.clamp(-drift * 0.5, -0.6, 0.6);
   ship.rotation.y = THREE.MathUtils.clamp(-drift * 0.12, -0.2, 0.2);
 
-  // move obstacles toward the camera + collision
-  for (let i = obstacles.length - 1; i >= 0; i--) {
-    const o = obstacles[i];
-    o.position.z += moveSpeed * dt;
-    o.position.x = LANE_X[o.userData.lane] + bendX(o.position.z);
-    o.rotation.x += o.userData.spin.x * dt;
-    o.rotation.y += o.userData.spin.y * dt;
-    o.rotation.z += o.userData.spin.z * dt;
+  // move tokens toward the camera; collect the one in the ship's lane
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const t = tokens[i];
+    t.position.z += moveSpeed * dt;
+    t.position.x = LANE_X[t.userData.lane] + bendX(t.position.z);
+    t.quaternion.copy(camera.quaternion); // billboard toward the camera
 
-    if (o.position.z > DESPAWN_Z) {
-      releaseObstacle(o);
-      obstacles.splice(i, 1);
-      continue;
-    }
-    if (state === STATE.PLAY) {
-      const dx = Math.abs(o.position.x - ship.position.x);
-      const dz = Math.abs(o.position.z - SHIP_Z);
-      if (dz < 0.9 + o.userData.radius && dx < 0.9 + o.userData.radius * 0.5) {
-        gameOver();
-        break;
+    // resolve once as the token reaches the ship's depth
+    if (!t.userData.done && t.position.z >= SHIP_Z) {
+      t.userData.done = true;
+      if (state === STATE.PLAY && t.userData.lane === shipState.lane) {
+        collectToken(t.userData.data);
+        releaseToken(t);
+        tokens.splice(i, 1);
+        continue;
       }
+    }
+    if (t.position.z > DESPAWN_Z) {
+      releaseToken(t);
+      tokens.splice(i, 1);
     }
   }
 }

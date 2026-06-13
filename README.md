@@ -1,11 +1,23 @@
 # InfinRun 🚀
 
-A 3-lane spaceship infinite runner in **real 3D** (Subway-Surfers style), built
-mobile-first. A chase camera follows your ship down a neon track while asteroids
-rush toward you — swipe (or tap the screen sides) to switch lanes. The longer you
-survive, the faster it gets.
+A 3-lane spaceship **math runner** in real 3D, built mobile-first. A chase camera
+follows your ship down a winding neon track. Instead of dodging, you **fly into
+digits and operators** to build a running calculation that matches the **TARGET**
+number — then it gives you a new one. Swipe to pick which token you grab.
 
 **Play:** https://whtspc.github.io/infinrun/
+
+## How to play
+
+- A **TARGET** number is shown at the top. Build it with the tokens you collect.
+- Tokens are **digits** (`0`–`9`) and **operators** (`+ − × ÷`). Collect a digit
+  to build a number (`1` then `2` → `12`); collect an operator to apply your held
+  number to the running total. It's a live, left-to-right calculator (no
+  precedence).
+- Match the target exactly to score and get a new target. Overshooting is fine —
+  use `−` and `÷` to come back.
+- A `÷` that wouldn't divide evenly is illegal and **resets your expression**.
+- Rows always leave at least one empty lane, so you can skip a token you don't want.
 
 ## Controls
 

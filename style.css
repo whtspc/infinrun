@@ -71,6 +71,71 @@ body {
   color: var(--accent);
 }
 
+/* ---------- Math HUD ---------- */
+#mathbar {
+  position: absolute;
+  top: max(64px, calc(env(safe-area-inset-top) + 52px));
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  text-align: center;
+}
+
+.target-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.target-row .hud-label {
+  font-size: 12px;
+  letter-spacing: 3px;
+  opacity: 0.7;
+}
+
+#target {
+  font-size: 46px;
+  font-weight: 800;
+  color: #ffd84d;
+  text-shadow: 0 0 22px rgba(255, 216, 77, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+#expr {
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgba(8, 14, 28, 0.5);
+  min-height: 1.4em;
+}
+
+#expr.flash-good {
+  animation: flashGood 0.6s ease-out;
+}
+#expr.flash-bad {
+  animation: flashBad 0.5s ease-out;
+}
+
+@keyframes flashGood {
+  0% { color: #36ffa6; transform: scale(1.25); text-shadow: 0 0 24px rgba(54, 255, 166, 0.9); }
+  100% { color: var(--text); transform: scale(1); }
+}
+@keyframes flashBad {
+  0%, 60% { color: #ff4d8d; transform: translateX(0); }
+  15% { transform: translateX(-7px); }
+  45% { transform: translateX(7px); }
+  100% { color: var(--text); transform: translateX(0); }
+}
+
 /* ---------- Overlays ---------- */
 .overlay {
   position: absolute;
