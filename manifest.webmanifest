@@ -1,0 +1,18 @@
+{
+  "name": "InfinRun — Spaceship Runner",
+  "short_name": "InfinRun",
+  "description": "A 3-lane spaceship infinite runner. Swipe to dodge the asteroids.",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#05060f",
+  "theme_color": "#05060f",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

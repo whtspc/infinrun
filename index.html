@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+  />
+  <meta name="theme-color" content="#05060f" />
+  <meta name="description" content="InfinRun — a 3-lane spaceship infinite runner. Swipe to dodge the asteroids." />
+
+  <!-- Add-to-home-screen / fullscreen on mobile -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="InfinRun" />
+  <link rel="manifest" href="manifest.webmanifest" />
+
+  <title>InfinRun — Spaceship Runner</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-wrap">
+    <canvas id="game"></canvas>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <div class="hud-score">
+        <span class="hud-label">SCORE</span>
+        <span id="score">0</span>
+      </div>
+      <div class="hud-best">
+        <span class="hud-label">BEST</span>
+        <span id="best">0</span>
+      </div>
+    </div>
+
+    <!-- Start screen -->
+    <div id="start" class="overlay">
+      <h1>INFIN<span>RUN</span></h1>
+      <p class="tagline">3-lane spaceship dash</p>
+      <button id="play-btn" class="btn">TAP TO LAUNCH</button>
+      <p class="hint">Swipe&nbsp;◀&nbsp;▶&nbsp; or tap the screen sides to change lanes</p>
+    </div>
+
+    <!-- Game over screen -->
+    <div id="gameover" class="overlay hidden">
+      <h2>GAME OVER</h2>
+      <div class="final">
+        <div><span class="hud-label">SCORE</span><strong id="final-score">0</strong></div>
+        <div><span class="hud-label">BEST</span><strong id="final-best">0</strong></div>
+      </div>
+      <p id="new-best" class="new-best hidden">★ NEW BEST! ★</p>
+      <button id="retry-btn" class="btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
