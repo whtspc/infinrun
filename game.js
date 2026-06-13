@@ -20,7 +20,7 @@ const newBestEl = document.getElementById("new-best");
 // ---------------------------------------------------------------------------
 const LANES = 3;
 const LANE_X = [-2.4, 0, 2.4]; // x position of each lane
-const SHIP_Z = 0; // ship stays here; the world scrolls toward +z
+const SHIP_Z = -3.5; // ship sits a bit down the track so side lanes stay on-screen
 const SHIP_Y = 0.6;
 const FLOOR_Y = -0.2;
 const SPAWN_Z = -150; // obstacles appear this far ahead
@@ -44,10 +44,10 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 scene.fog = new THREE.Fog(BG, 35, 145);
 
-const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 400);
-const CAM_BASE = new THREE.Vector3(0, 3.2, 7);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
+const CAM_BASE = new THREE.Vector3(0, 3.0, 6.5);
 camera.position.copy(CAM_BASE);
-camera.lookAt(0, 1.0, -12);
+camera.lookAt(0, 0.9, -16);
 
 // ---------------------------------------------------------------------------
 // Lights
@@ -197,6 +197,7 @@ function buildShip() {
 }
 
 const ship = buildShip();
+ship.scale.setScalar(1.15); // keep it readable now that it sits further away
 ship.position.set(LANE_X[1], SHIP_Y, SHIP_Z);
 scene.add(ship);
 
