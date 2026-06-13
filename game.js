@@ -15,7 +15,7 @@ const finalScoreEl = document.getElementById("final-score");
 const finalBestEl = document.getElementById("final-best");
 const newBestEl = document.getElementById("new-best");
 const mathbar = document.getElementById("mathbar");
-const targetEl = document.getElementById("target");
+const targetsContainer = document.getElementById("targets");
 const exprEl = document.getElementById("expr");
 
 // ---------------------------------------------------------------------------
@@ -29,8 +29,8 @@ const FLOOR_Y = -0.2;
 const SPAWN_Z = -150; // tokens appear this far ahead
 const DESPAWN_Z = 8; // ...and are recycled once they pass the camera
 
-const BASE_SPEED = 22; // world units / second
-const MAX_SPEED = 50; // capped lower than the dodger — you need time to read tokens
+const BASE_SPEED = 20; // world units / second
+const MAX_SPEED = 30; // gentle ceiling — you need time to scan the targets
 
 // Track curvature (purely visual). bend() returns a sideways offset that is
 // ~0 at the ship's depth and grows with distance ahead, so the road appears
@@ -403,22 +403,24 @@ let spawnTimer = 0;
 let spawnInterval = 1.2;
 let shake = 0;
 let solves = 0;
-let target = 0;
+const TARGET_COUNT = 5;
+let targets = [];
+let targetEls = [];
 
 const BEST_KEY = "infinrun_best";
 let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10) || 0;
 bestEl.textContent = best;
 
 // --- Expression engine: a running calculator. Each token is a whole move
-// (operator + integer, e.g. "+3"), applied to the running total which seeds
-// at 0. An illegal division (fraction) resets the total. ---
+// (operator + integer, e.g. "+3") applied to the running total, which seeds
+// at 0. Division floors the result. Reach ANY of the live targets to score. ---
 const expr = { total: 0 };
 
 function applyOp(a, op, b) {
   if (op === "+") return a + b;
   if (op === "-") return a - b;
   if (op === "*") return a * b;
-  if (op === "/") return a / b;
+  if (op === "/") return Math.floor(a / b); // floor division — always valid
   return b;
 }
 
@@ -426,17 +428,41 @@ function resetExpr() {
   expr.total = 0;
 }
 
-function pickTarget() {
-  const max = Math.min(99, 18 + solves * 4);
-  target = 10 + Math.floor(Math.random() * (max - 9));
-  if (targetEl) targetEl.textContent = target;
+function targetMax() {
+  return Math.min(99, 16 + solves * 2);
 }
 
-function flashExpr(bad) {
+function newTargetValue() {
+  const max = targetMax();
+  let v;
+  do {
+    v = 10 + Math.floor(Math.random() * (max - 9));
+  } while (targets.includes(v));
+  return v;
+}
+
+function buildTargetChips() {
+  targetsContainer.innerHTML = "";
+  targetEls = [];
+  for (let i = 0; i < TARGET_COUNT; i++) {
+    const s = document.createElement("span");
+    s.className = "target-chip";
+    targetsContainer.appendChild(s);
+    targetEls.push(s);
+  }
+}
+
+function pickTargets() {
+  targets = [];
+  for (let i = 0; i < TARGET_COUNT; i++) targets.push(newTargetValue());
+  for (let i = 0; i < TARGET_COUNT; i++) targetEls[i].textContent = targets[i];
+}
+
+function flashExpr(good) {
   if (!exprEl) return;
-  exprEl.classList.remove("flash-bad", "flash-good");
+  exprEl.classList.remove("flash-good");
   void exprEl.offsetWidth; // restart the animation
-  exprEl.classList.add(bad ? "flash-bad" : "flash-good");
+  exprEl.classList.add("flash-good");
 }
 
 function updateMathHud() {
@@ -444,7 +470,10 @@ function updateMathHud() {
   exprEl.textContent = String(expr.total);
 }
 
-function onTargetHit() {
+// returns true if the current total matched (and replaced) a target
+function trySolve() {
+  const idx = targets.indexOf(expr.total);
+  if (idx === -1) return false;
   solves += 1;
   score += 100 + Math.floor(elapsed); // small time bonus
   scoreEl.textContent = score;
@@ -454,30 +483,25 @@ function onTargetHit() {
     bestEl.textContent = best;
   }
   spawnExplosion(ship.position, CYAN, 0xffd84d);
-  flashExpr(false);
+  flashExpr();
+  // refill the solved slot with a fresh, distinct target
+  const nv = newTargetValue();
+  targets[idx] = nv;
+  const chip = targetEls[idx];
+  chip.textContent = nv;
+  chip.classList.remove("chip-solved");
+  void chip.offsetWidth;
+  chip.classList.add("chip-solved");
   resetExpr();
-  pickTarget();
   updateMathHud();
+  return true;
 }
 
 // apply a combined operator+integer token to the running total
 function collectToken(data) {
-  const { op, n } = data;
-  if (op === "/") {
-    if (n === 0 || expr.total % n !== 0) {
-      // illegal division → reset the total (forgiving), with a cue
-      resetExpr();
-      flashExpr(true);
-      shake = Math.max(shake, 0.25);
-      updateMathHud();
-      return;
-    }
-    expr.total = expr.total / n;
-  } else {
-    expr.total = applyOp(expr.total, op, n);
-  }
+  expr.total = applyOp(expr.total, data.op, data.n);
   updateMathHud();
-  if (expr.total === target) onTargetHit();
+  trySolve();
 }
 
 function reset() {
@@ -502,7 +526,8 @@ function reset() {
   spawnTimer = 0.6;
   shake = 0;
   resetExpr();
-  pickTarget();
+  if (targetEls.length === 0) buildTargetChips();
+  pickTargets();
   updateMathHud();
 }
 
@@ -594,8 +619,8 @@ document.getElementById("retry-btn").addEventListener("click", startGame);
 // ---------------------------------------------------------------------------
 // Spawning
 // ---------------------------------------------------------------------------
-// operators weighted so ÷ (often illegal) is rarer
-const OP_BAG = ["+", "+", "+", "-", "-", "*", "*", "/"];
+// operator pool (division is always valid now, so it's a normal option)
+const OP_BAG = ["+", "+", "-", "-", "*", "*", "/", "/"];
 
 function randomTokenData() {
   const op = OP_BAG[Math.floor(Math.random() * OP_BAG.length)];
@@ -685,8 +710,8 @@ function update(dt) {
     score += dt * 10 + (speed / BASE_SPEED) * dt * 4;
     scoreEl.textContent = Math.floor(score);
 
-    speed = Math.min(MAX_SPEED, BASE_SPEED + elapsed * 0.9);
-    spawnInterval = Math.max(0.7, 1.2 - elapsed * 0.006);
+    speed = Math.min(MAX_SPEED, BASE_SPEED + elapsed * 0.18);
+    spawnInterval = Math.max(0.8, 1.2 - elapsed * 0.004);
 
     spawnTimer -= dt;
     if (spawnTimer <= 0) {

@@ -9,14 +9,14 @@ number — then it gives you a new one. Swipe to pick which token you grab.
 
 ## How to play
 
-- A **TARGET** number is shown at the top. Steer your running total to it.
+- **Five TARGET** numbers are shown at the top. Steer your running total onto
+  **any** of them to score it — that one is replaced with a fresh target.
 - Each token is a whole move — an operator combined with an integer, e.g. `+3`,
   `−2`, `×4`, `/6`. Fly into one to apply it to your total (which starts at 0).
   It's a left-to-right calculator (no precedence).
 - Tokens are colour-coded by operator (`+` green, `−` pink, `×` cyan, `/` gold).
-- Match the target exactly to score and get a new (bigger) target. Overshooting is
-  fine — use `−` and `/` to come back.
-- A `/` that wouldn't divide evenly is illegal and **resets your total**.
+- `/` always works and **rounds down** (floor division, e.g. `7 / 2 = 3`).
+- Overshooting is fine — use `−` and `/` to come back.
 - Rows always leave at least one empty lane, so you can steer there to **skip**.
 
 ## Controls

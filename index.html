@@ -48,13 +48,11 @@
       </div>
     </div>
 
-    <!-- Math HUD: the target to build and your running expression -->
+    <!-- Math HUD: the targets to reach and your running total -->
     <div id="mathbar" class="hidden">
-      <div class="target-row">
-        <span class="hud-label">TARGET</span>
-        <span id="target">0</span>
-      </div>
-      <div id="expr">·</div>
+      <span class="hud-label">TARGETS</span>
+      <div id="targets"></div>
+      <div id="expr">0</div>
     </div>
 
     <!-- Start screen -->
@@ -63,10 +61,10 @@
       <p class="tagline">build the number</p>
       <button id="play-btn" class="btn">TAP TO LAUNCH</button>
       <p class="hint">
-        Fly into moves like <b>+3</b>, <b>×4</b>, <b>/2</b> to steer your total to
-        the <b>TARGET</b>.<br />Swipe&nbsp;◀&nbsp;▶ or tap the screen sides; an
-        <b>empty lane</b> lets you skip.<br />A <b>/</b> that won't divide evenly
-        resets your total.
+        Fly into moves like <b>+3</b>, <b>×4</b>, <b>/2</b> to steer your total
+        onto <b>any</b> of the targets.<br />Swipe&nbsp;◀&nbsp;▶ or tap the screen
+        sides; an <b>empty lane</b> lets you skip.<br /><b>/</b> always works and
+        rounds down (e.g. 7 / 2 = 3).
       </p>
     </div>
 
